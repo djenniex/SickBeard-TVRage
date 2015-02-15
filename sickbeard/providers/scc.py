@@ -40,15 +40,6 @@ from sickbeard.helpers import sanitizeSceneName
 
 
 class SCCProvider(generic.TorrentProvider):
-    urls = {'base_url': 'https://sceneaccess.eu',
-            'login': 'https://sceneaccess.eu/login',
-            'detail': 'https://www.sceneaccess.eu/details?id=%s',
-            'search': 'https://sceneaccess.eu/browse?search=%s&method=1&%s',
-            'nonscene': 'https://sceneaccess.eu/nonscene?search=%s&method=1&c44=44&c45=44',
-            'foreign': 'https://sceneaccess.eu/foreign?search=%s&method=1&c34=34&c33=33',
-            'archive': 'https://sceneaccess.eu/archive?search=%s&method=1&c26=26',
-            'download': 'https://www.sceneaccess.eu/%s',
-    }
 
     def __init__(self):
 
@@ -64,6 +55,16 @@ class SCCProvider(generic.TorrentProvider):
         self.minleech = None
 
         self.cache = SCCCache(self)
+
+        self.urls = {'base_url': 'https://sceneaccess.eu',
+                'login': 'https://sceneaccess.eu/login',
+                'detail': 'https://www.sceneaccess.eu/details?id=%s',
+                'search': 'https://sceneaccess.eu/browse?search=%s&method=1&%s',
+                'nonscene': 'https://sceneaccess.eu/nonscene?search=%s&method=1&c44=44&c45=44',
+                'foreign': 'https://sceneaccess.eu/foreign?search=%s&method=1&c34=34&c33=33',
+                'archive': 'https://sceneaccess.eu/archive?search=%s&method=1&c26=26',
+                'download': 'https://www.sceneaccess.eu/%s',
+                }
 
         self.url = self.urls['base_url']
 
@@ -145,7 +146,7 @@ class SCCProvider(generic.TorrentProvider):
             for show_name in set(show_name_helpers.allPossibleShowNames(self.show)):
                 ep_string = show_name_helpers.sanitizeSceneName(show_name) + ' ' + \
                             sickbeard.config.naming_ep_type[2] % {'seasonnumber': ep_obj.scene_season,
-                                                                  'episodenumber': ep_obj.scene_episode}
+                                                                  'episodenumber': ep_obj.scene_episode} + ' %s' % add_string
 
                 search_string['Episode'].append(re.sub('\s+', ' ', ep_string))
 
@@ -164,7 +165,10 @@ class SCCProvider(generic.TorrentProvider):
         items = {'Season': [], 'Episode': [], 'RSS': []}
 
         if not self._doLogin():
-            return []
+            return results
+
+        data = []
+        searchURLS = []
 
         for mode in search_params.keys():
             for search_string in search_params[mode]:
@@ -172,89 +176,77 @@ class SCCProvider(generic.TorrentProvider):
                 if isinstance(search_string, unicode):
                     search_string = unidecode(search_string)
 
-                nonsceneSearchURL = None
-                foreignSearchURL = None
                 if mode == 'Season':
-                    searchURL = self.urls['archive'] % (search_string)
-                    data = [self.getURL(searchURL)]
+                    searchURLS += [self.urls['archive'] % (search_string)]
                 else:
-                    searchURL = self.urls['search'] % (search_string, self.categories)
-                    nonsceneSearchURL = self.urls['nonscene'] % (search_string)
-                    foreignSearchURL = self.urls['foreign'] % (search_string)
-                    data = [self.getURL(searchURL),
-                            self.getURL(nonsceneSearchURL),
-                            self.getURL(foreignSearchURL)]
-                    logger.log(u"Search string: " + nonsceneSearchURL, logger.DEBUG)
-                    logger.log(u"Search string: " + foreignSearchURL, logger.DEBUG)
+                    searchURLS += [self.urls['search'] % (search_string, self.categories)]
+                    searchURLS += [self.urls['nonscene'] % (search_string)]
+                    searchURLS += [self.urls['foreign'] % (search_string)]
 
-                logger.log(u"Search string: " + searchURL, logger.DEBUG)
+                for searchURL in searchURLS:
+                    logger.log(u"Search string: " + searchURL, logger.DEBUG)
+                    data += [x for x in [self.getURL(searchURL)] if x]
 
-                if not data:
+                if not len(data):
                     continue
 
-                try:
-                    for dataItem in data:
-                        with BS4Parser(dataItem, features=["html5lib", "permissive"]) as html:
-                            torrent_table = html.find('table', attrs={'id': 'torrents-table'})
-                            torrent_rows = torrent_table.find_all('tr') if torrent_table else []
+            try:
+                for dataItem in data:
+                    with BS4Parser(dataItem, features=["html5lib", "permissive"]) as html:
+                        torrent_table = html.find('table', attrs={'id': 'torrents-table'})
+                        torrent_rows = torrent_table.find_all('tr') if torrent_table else []
 
-                            #Continue only if at least one Release is found
-                            if len(torrent_rows) < 2:
-                                if html.title:
-                                    source = self.name + " (" + html.title.string + ")"
+                        #Continue only if at least one Release is found
+                        if len(torrent_rows) < 2:
+                            if html.title:
+                                source = self.name + " (" + html.title.string + ")"
+                            else:
+                                source = self.name
+                            logger.log(u"The Data returned from " + source + " does not contain any torrent", logger.DEBUG)
+                            continue
+
+                        for result in torrent_table.find_all('tr')[1:]:
+
+                            try:
+                                link = result.find('td', attrs={'class': 'ttr_name'}).find('a')
+                                all_urls = result.find('td', attrs={'class': 'td_dl'}).find_all('a', limit=2)
+                                # Foreign section contain two links, the others one
+                                if self._isSection('Foreign', dataItem):
+                                    url = all_urls[1]
                                 else:
-                                    source = self.name
-                                logger.log(u"The Data returned from " + source + " does not contain any torrent", logger.DEBUG)
+                                    url = all_urls[0]
+
+                                title = link.string
+                                if re.search('\.\.\.', title):
+                                    data = self.getURL(self.url + "/" + link['href'])
+                                    if data:
+                                        with BS4Parser(data) as details_html:
+                                            title = re.search('(?<=").+(?<!")', details_html.title.string).group(0)
+                                download_url = self.urls['download'] % url['href']
+                                id = int(link['href'].replace('details?id=', ''))
+                                seeders = int(result.find('td', attrs={'class': 'ttr_seeders'}).string)
+                                leechers = int(result.find('td', attrs={'class': 'ttr_leechers'}).string)
+                            except (AttributeError, TypeError):
                                 continue
 
-                            for result in torrent_table.find_all('tr')[1:]:
+                            if mode != 'RSS' and (seeders < self.minseed or leechers < self.minleech):
+                                continue
 
-                                try:
-                                    link = result.find('td', attrs={'class': 'ttr_name'}).find('a')
-                                    all_urls = result.find('td', attrs={'class': 'td_dl'}).find_all('a', limit=2)
-                                    # Foreign section contain two links, the others one
-                                    if self._isSection('Foreign', dataItem):
-                                        url = all_urls[1]
-                                    else:
-                                        url = all_urls[0]
+                            if not title or not download_url:
+                                continue
 
-                                    title = link.string
-                                    if re.search('\.\.\.', title):
-                                        data = self.getURL(self.url + "/" + link['href'])
-                                        if data:
-                                            with BS4Parser(data) as details_html:
-                                                title = re.search('(?<=").+(?<!")', details_html.title.string).group(0)
-                                    download_url = self.urls['download'] % url['href']
-                                    id = int(link['href'].replace('details?id=', ''))
-                                    seeders = int(result.find('td', attrs={'class': 'ttr_seeders'}).string)
-                                    leechers = int(result.find('td', attrs={'class': 'ttr_leechers'}).string)
-                                except (AttributeError, TypeError):
-                                    continue
+                            item = title, download_url, id, seeders, leechers
+                            #logger.log(u"Found result: " + title + "(" + searchURL + ")", logger.DEBUG)
 
-                                if mode != 'RSS' and (seeders < self.minseed or leechers < self.minleech):
-                                    continue
+                            items[mode].append(item)
 
-                                if not title or not download_url:
-                                    continue
+                # for each search mode sort all the items by seeders
+                items[mode].sort(key=lambda tup: tup[3], reverse=True)
+                results += items[mode]
 
-                                item = title, download_url, id, seeders, leechers
-
-                                if self._isSection('Non-Scene', dataItem):
-                                    logger.log(u"Found result: " + title + "(" + nonsceneSearchURL + ")", logger.DEBUG)
-                                elif self._isSection('Foreign', dataItem):
-                                    logger.log(u"Found result: " + title + "(" + foreignSearchURL + ")", logger.DEBUG)
-                                else:
-                                    logger.log(u"Found result: " + title + "(" + searchURL + ")", logger.DEBUG)
-
-                                items[mode].append(item)
-
-                except Exception, e:
-                    logger.log(u"Failed parsing " + self.name + " Traceback: " + traceback.format_exc(), logger.ERROR)
-
-            #For each search mode sort all the items by seeders
-            items[mode].sort(key=lambda tup: tup[3], reverse=True)
-
-            results += items[mode]
+            except Exception, e:
+                logger.log(u"Failed parsing " + self.name + " Traceback: " + traceback.format_exc(), logger.ERROR)
+                continue
 
         return results
 
@@ -314,8 +306,6 @@ class SCCCache(tvcache.TVCache):
 
     def _getRSSData(self):
         search_params = {'RSS': ['']}
-        return self.provider._doSearch(search_params)
-
-
+        return {'entries': self.provider._doSearch(search_params)}
 
 provider = SCCProvider()

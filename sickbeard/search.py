@@ -167,7 +167,7 @@ def snatchEpisode(result, endStatus=SNATCHED):
             sql_l.append(curEpObj.get_sql())
 
         if curEpObj.status not in Quality.DOWNLOADED:
-            notifiers.notify_snatch(curEpObj._format_pattern('%SN - %Sx%0E - %EN - %QN'))
+            notifiers.notify_snatch(curEpObj._format_pattern('%SN - %Sx%0E - %EN - %QN') + " from " + result.provider.name)
 
     if len(sql_l) > 0:
         myDB = db.DBConnection()
@@ -195,40 +195,45 @@ def filter_release_name(name, filter_words):
     return False
 
 
-def pickBestResult(results, show, quality_list=None):
+def pickBestResult(results, show=None, quality_list=None):
+    results = results if isinstance(results, list) else [results]
+
     logger.log(u"Picking the best result out of " + str([x.name for x in results]), logger.DEBUG)
 
-    # build the black And white list
     bwl = None
-    if show:
-        if show.is_anime:
-            bwl = BlackAndWhiteList(show.indexerid)
-    else:
-        logger.log("Could not create black and white list no show was given", logger.DEBUG)
+    bestResult = None
 
     # find the best result for the current episode
-    bestResult = None
     for cur_result in results:
-            
-        logger.log("Quality of " + cur_result.name + " is " + Quality.qualityStrings[cur_result.quality])
+        if show and cur_result.show is not show:
+            continue
 
-        if bwl:
+        # build the black And white list
+        if not bwl and cur_result.show.is_anime:
+            bwl = BlackAndWhiteList(cur_result.show.indexerid)
             if not bwl.is_valid(cur_result):
-                logger.log(cur_result.name+" does not match the blacklist or the whitelist, rejecting it. Result: " + bwl.get_last_result_msg(), logger.MESSAGE)
+                logger.log(cur_result.name+" does not match the blacklist or the whitelist, rejecting it. Result: " + bwl.get_last_result_msg(), logger.INFO)
                 continue
+
+        logger.log("Quality of " + cur_result.name + " is " + Quality.qualityStrings[cur_result.quality])
 
         if quality_list and cur_result.quality not in quality_list:
             logger.log(cur_result.name + " is a quality we know we don't want, rejecting it", logger.DEBUG)
             continue
 
-        if show.rls_ignore_words and filter_release_name(cur_result.name, show.rls_ignore_words):
+        if show.rls_ignore_words and filter_release_name(cur_result.name, cur_result.show.rls_ignore_words):
             logger.log(u"Ignoring " + cur_result.name + " based on ignored words filter: " + show.rls_ignore_words,
-                       logger.MESSAGE)
+                       logger.INFO)
             continue
 
-        if show.rls_require_words and not filter_release_name(cur_result.name, show.rls_require_words):
+        if show.rls_require_words and not filter_release_name(cur_result.name, cur_result.show.rls_require_words):
             logger.log(u"Ignoring " + cur_result.name + " based on required words filter: " + show.rls_require_words,
-                       logger.MESSAGE)
+                       logger.INFO)
+            continue
+
+        if not show_name_helpers.filterBadReleases(cur_result.name, parse=False):
+            logger.log(u"Ignoring " + cur_result.name + " because its not a valid scene release that we want, ignoring it",
+                       logger.INFO)
             continue
 
         if sickbeard.USE_FAILED_DOWNLOADS and failed_history.hasFailed(cur_result.name, cur_result.size,
@@ -339,7 +344,7 @@ def wantedEpisodes(show, fromDate):
     # check through the list of statuses to see if we want any
     wanted = []
     for result in sqlResults:
-        curCompositeStatus = int(result["status"])
+        curCompositeStatus = int(result["status"] or -1)
         curStatus, curQuality = common.Quality.splitCompositeStatus(curCompositeStatus)
 
         if bestQualities:
@@ -370,19 +375,16 @@ def searchForNeededEpisodes():
     episodes = []
 
     for curShow in show_list:
-        if curShow.paused:
-            continue
+        if not curShow.paused:
+            episodes.extend(wantedEpisodes(curShow, fromDate))
 
-        episodes.extend(wantedEpisodes(curShow, fromDate))
-
-    providers = [x for x in sickbeard.providers.sortedProviderList() if x.isActive() and x.enable_daily]
+    providers = [x for x in sickbeard.providers.sortedProviderList(sickbeard.RANDOMIZE_PROVIDERS) if x.isActive() and x.enable_daily]
     for curProvider in providers:
+        threads += [threading.Thread(target=curProvider.cache.updateCache, name=origThreadName + " :: [" + curProvider.name + "]")]
 
-        # spawn separate threads for each provider so we don't need to wait for providers with slow network operation
-        threads.append(threading.Thread(target=curProvider.cache.updateCache, name=origThreadName +
-                                                                                   " :: [" + curProvider.name + "]"))
-        # start the thread we just created
-        threads[-1].start()
+    # start the thread we just created
+    for t in threads:
+        t.start()
 
     # wait for all threads to finish
     for t in threads:
@@ -390,20 +392,11 @@ def searchForNeededEpisodes():
 
     for curProvider in providers:
         threading.currentThread().name = origThreadName + " :: [" + curProvider.name + "]"
-
         curFoundResults = curProvider.searchRSS(episodes)
-
         didSearch = True
 
         # pick a single result for each episode, respecting existing results
         for curEp in curFoundResults:
-
-            if curEp.show.paused:
-                logger.log(
-                    u"Show " + curEp.show.name + " is paused, ignoring all RSS items for " + curEp.prettyName(),
-                    logger.DEBUG)
-                continue
-
             # find the best result for the current episode
             bestResult = None
             for curResult in curFoundResults[curEp]:
@@ -446,13 +439,26 @@ def searchProviders(show, episodes, manualSearch=False):
     finalResults = []
 
     didSearch = False
+    threads = []
 
     # build name cache for show
     sickbeard.name_cache.buildNameCache(show)
 
     origThreadName = threading.currentThread().name
 
-    providers = [x for x in sickbeard.providers.sortedProviderList() if x.isActive() and x.enable_backlog]
+    providers = [x for x in sickbeard.providers.sortedProviderList(sickbeard.RANDOMIZE_PROVIDERS) if x.isActive() and x.enable_backlog]
+    for curProvider in providers:
+        threads += [threading.Thread(target=curProvider.cache.updateCache,
+                                     name=origThreadName + " :: [" + curProvider.name + "]")]
+
+    # start the thread we just created
+    for t in threads:
+        t.start()
+
+    # wait for all threads to finish
+    for t in threads:
+        t.join()
+
     for providerNum, curProvider in enumerate(providers):
         if curProvider.anime_only and not show.is_anime:
             logger.log(u"" + str(show.name) + " is not an anime, skiping", logger.DEBUG)
@@ -474,7 +480,6 @@ def searchProviders(show, episodes, manualSearch=False):
                 logger.log(u"Performing season pack search for " + show.name)
 
             try:
-                curProvider.cache.updateCache()
                 searchResults = curProvider.findSearchResults(show, episodes, search_mode, manualSearch)
             except exceptions.AuthException, e:
                 logger.log(u"Authentication error: " + ex(e), logger.ERROR)
@@ -491,10 +496,6 @@ def searchProviders(show, episodes, manualSearch=False):
             if len(searchResults):
                 # make a list of all the results for this provider
                 for curEp in searchResults:
-                    # skip non-tv crap
-                    searchResults[curEp] = filter(
-                        lambda x: show_name_helpers.filterBadReleases(x.name, parse=False) and x.show == show, searchResults[curEp])
-
                     if curEp in foundResults:
                         foundResults[curProvider.name][curEp] += searchResults[curEp]
                     else:
@@ -581,10 +582,6 @@ def searchProviders(show, episodes, manualSearch=False):
 
                     # if not, break it apart and add them as the lowest priority results
                     individualResults = nzbSplitter.splitResult(bestSeasonResult)
-
-                    individualResults = filter(
-                        lambda x: show_name_helpers.filterBadReleases(x.name, parse=False) and x.show == show, individualResults)
-
                     for curResult in individualResults:
                         if len(curResult.episodes) == 1:
                             epNum = curResult.episodes[0].episode
@@ -604,7 +601,8 @@ def searchProviders(show, episodes, manualSearch=False):
                         u"Adding multi-ep result for full-season torrent. Set the episodes you don't want to 'don't download' in your torrent client if desired!")
                     epObjs = []
                     for curEpNum in allEps:
-                        epObjs.append(show.getEpisode(season, curEpNum))
+                        for season in set([x.season for x in episodes]):
+                            epObjs.append(show.getEpisode(season, curEpNum))
                     bestSeasonResult.episodes = epObjs
 
                     epNum = MULTI_EP_RESULT

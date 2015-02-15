@@ -43,11 +43,12 @@ __all__ = ['ezrss',
 
 import sickbeard
 import generic
+
 from sickbeard import logger
 from os import sys
+from random import shuffle
 
-
-def sortedProviderList():
+def sortedProviderList(randomize=False):
     initialList = sickbeard.providerList + sickbeard.newznabProviderList + sickbeard.torrentRssProviderList
     providerDict = dict(zip([x.getID() for x in initialList], initialList))
 
@@ -62,6 +63,9 @@ def sortedProviderList():
     for curModule in providerDict:
         if providerDict[curModule] not in newList:
             newList.append(providerDict[curModule])
+
+    if randomize:
+        shuffle(newList)
 
     return newList
 

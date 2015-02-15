@@ -40,11 +40,6 @@ from sickbeard.show_name_helpers import allPossibleShowNames
 
 
 class IPTorrentsProvider(generic.TorrentProvider):
-    urls = {'base_url': 'https://www.iptorrents.com',
-            'login': 'https://www.iptorrents.com/torrents/',
-            'search': 'https://www.iptorrents.com/torrents/?%s%s&q=%s&qf=ti',
-    }
-
     def __init__(self):
 
         generic.TorrentProvider.__init__(self, "IPTorrents")
@@ -58,6 +53,11 @@ class IPTorrentsProvider(generic.TorrentProvider):
         self.freeleech = False
 
         self.cache = IPTorrentsCache(self)
+
+        self.urls = {'base_url': 'https://www.iptorrents.com',
+                'login': 'https://www.iptorrents.com/torrents/',
+                'search': 'https://www.iptorrents.com/torrents/?%s%s&q=%s&qf=ti',
+        }
 
         self.url = self.urls['base_url']
 
@@ -158,13 +158,15 @@ class IPTorrentsProvider(generic.TorrentProvider):
         freeleech = '&free=on' if self.freeleech else ''
 
         if not self._doLogin():
-            return []
+            return results
 
         for mode in search_params.keys():
             for search_string in search_params[mode]:
+                if isinstance(search_string, unicode):
+                    search_string = unidecode(search_string)
 
                 # URL with 50 tv-show results, or max 150 if adjusted in IPTorrents profile
-                searchURL = self.urls['search'] % (self.categorie, freeleech, unidecode(search_string))
+                searchURL = self.urls['search'] % (self.categorie, freeleech, search_string)
                 searchURL += ';o=seeders' if mode != 'RSS' else ''
 
                 logger.log(u"" + self.name + " search page URL: " + searchURL, logger.DEBUG)
@@ -174,6 +176,7 @@ class IPTorrentsProvider(generic.TorrentProvider):
                     continue
 
                 try:
+                    data = re.sub(r'(?im)<button.+?<[\/]button>', '', data, 0)
                     with BS4Parser(data, features=["html5lib", "permissive"]) as html:
                         if not html:
                             logger.log(u"Invalid HTML data: " + str(data), logger.DEBUG)
@@ -278,7 +281,7 @@ class IPTorrentsCache(tvcache.TVCache):
 
     def _getRSSData(self):
         search_params = {'RSS': ['']}
-        return self.provider._doSearch(search_params)
+        return {'entries': self.provider._doSearch(search_params)}
 
 
 provider = IPTorrentsProvider()

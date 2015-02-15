@@ -23,13 +23,12 @@ import xml.etree.cElementTree as etree
 import xml.etree
 import re
 
-from name_parser.parser import NameParser, InvalidNameException, InvalidShowException
-
 from sickbeard import logger, classes, helpers
 from sickbeard.common import Quality
 from sickbeard import encodingKludge as ek
 from sickbeard.exceptions import ex
 
+from name_parser.parser import NameParser, InvalidNameException, InvalidShowException
 
 def getSeasonNZBs(name, urlData, season):
     try:
@@ -84,7 +83,7 @@ def createNZBString(fileElements, xmlns):
     for curFile in fileElements:
         rootElement.append(stripNS(curFile, xmlns))
 
-    return xml.etree.ElementTree.tostring(rootElement, 'utf-8', 'replace')
+    return xml.etree.ElementTree.tostring(ek.ss(rootElement))
 
 
 def saveNZB(nzbName, nzbString):

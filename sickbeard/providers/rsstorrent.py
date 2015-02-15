@@ -18,7 +18,6 @@
 
 import os
 import re
-import urlparse
 
 import sickbeard
 import generic
@@ -27,11 +26,9 @@ from sickbeard import helpers
 from sickbeard import encodingKludge as ek
 from sickbeard import logger
 from sickbeard import tvcache
-from sickbeard import clients
 from sickbeard.exceptions import ex
 
 from lib import requests
-from lib.requests import exceptions
 from lib.bencode import bdecode
 
 
@@ -40,8 +37,11 @@ class TorrentRssProvider(generic.TorrentProvider):
                  enable_backlog=False):
         generic.TorrentProvider.__init__(self, name)
         self.cache = TorrentRssCache(self)
-        self.url = re.sub('\/$', '', url)
-        self.url = url
+
+        self.urls = {'base_url': re.sub('\/$', '', url)}
+
+        self.url = self.urls['base_url']
+
         self.enabled = True
         self.ratio = None
         self.supportsBacklog = False
@@ -74,20 +74,18 @@ class TorrentRssProvider(generic.TorrentProvider):
 
     def _get_title_and_url(self, item):
 
-        title, url = None, None
-
-        title = item.title
-
+        title = item.get('title')
         if title:
             title = u'' + title
             title = title.replace(' ', '.')
 
-        attempt_list = [lambda: item.torrent_magneturi,
+        attempt_list = [lambda: item.get('torrent_magneturi'),
 
                         lambda: item.enclosures[0].href,
 
-                        lambda: item.link]
+                        lambda: item.get('link')]
 
+        url = None
         for cur_attempt in attempt_list:
             try:
                 url = cur_attempt()
@@ -95,9 +93,9 @@ class TorrentRssProvider(generic.TorrentProvider):
                 continue
 
             if title and url:
-                return (title, url)
+                break
 
-        return (title, url)
+        return title, url
 
     def validateRSS(self):
 
@@ -107,12 +105,11 @@ class TorrentRssProvider(generic.TorrentProvider):
                 if not cookie_validator.match(self.cookies):
                     return (False, 'Cookie is not correctly formatted: ' + self.cookies)
 
-            items = self.cache._getRSSData()
-
-            if not len(items) > 0:
+            data = self.cache._getRSSData()['entries']
+            if not data:
                 return (False, 'No items found in the RSS feed ' + self.url)
 
-            (title, url) = self._get_title_and_url(items[0])
+            (title, url) = self._get_title_and_url(data[0])
 
             if not title:
                 return (False, 'Unable to get title from first item')
@@ -150,7 +147,7 @@ class TorrentRssProvider(generic.TorrentProvider):
         except IOError, e:
             logger.log("Unable to save the file: " + ex(e), logger.ERROR)
             return False
-        logger.log(u"Saved custom_torrent html dump " + dumpName + " ", logger.MESSAGE)
+        logger.log(u"Saved custom_torrent html dump " + dumpName + " ", logger.INFO)
         return True
 
     def seedRatio(self):
@@ -165,13 +162,7 @@ class TorrentRssCache(tvcache.TVCache):
     def _getRSSData(self):
         logger.log(u"TorrentRssCache cache update URL: " + self.provider.url, logger.DEBUG)
 
-        request_headers = None
         if self.provider.cookies:
-            request_headers = {'Cookie': self.provider.cookies}
+            self.provider.headers.update({'Cookie': self.provider.cookies})
 
-        data = self.getRSSFeed(self.provider.url, request_headers=request_headers)
-
-        if data and 'entries' in data:
-            return data.entries
-        else:
-            return []
+        return self.getRSSFeed(self.provider.url, items=['entries', 'feed'])

@@ -20,13 +20,14 @@ import datetime
 import operator
 import threading
 import traceback
+from search import pickBestResult
 
 import sickbeard
 
 from sickbeard import db
 from sickbeard import exceptions
 from sickbeard.exceptions import ex
-from sickbeard import helpers, logger, show_name_helpers
+from sickbeard import helpers, logger
 from sickbeard import search
 from sickbeard import history
 
@@ -74,7 +75,7 @@ class ProperFinder():
 
         # for each provider get a list of the
         origThreadName = threading.currentThread().name
-        providers = [x for x in sickbeard.providers.sortedProviderList() if x.isActive()]
+        providers = [x for x in sickbeard.providers.sortedProviderList(sickbeard.RANDOMIZE_PROVIDERS) if x.isActive()]
         for curProvider in providers:
             threading.currentThread().name = origThreadName + " :: [" + curProvider.name + "]"
 
@@ -136,11 +137,17 @@ class ProperFinder():
             curProper.indexer = parse_result.show.indexer
 
             # populate our Proper instance
-            curProper.season = parse_result.season_number if parse_result.season_number != None else 1
+            curProper.show = parse_result.show
+            curProper.season = parse_result.season_number if parse_result.season_number is not None else 1
             curProper.episode = parse_result.episode_numbers[0]
             curProper.release_group = parse_result.release_group
             curProper.version = parse_result.version
             curProper.quality = Quality.nameQuality(curProper.name, parse_result.is_anime)
+
+            # filter release
+            if not pickBestResult(curProper):
+                logger.log(u"Proper " + curProper.name + " were rejected by our release filters.", logger.DEBUG)
+                continue
 
             # only get anime proper if it has release group and version
             if parse_result.is_anime:
@@ -148,25 +155,6 @@ class ProperFinder():
                     logger.log(u"Proper " + curProper.name + " doesn't have a release group and version, ignoring it",
                                logger.DEBUG)
                     continue
-
-            if not show_name_helpers.filterBadReleases(curProper.name, parse=False):
-                logger.log(u"Proper " + curProper.name + " isn't a valid scene release that we want, ignoring it",
-                           logger.DEBUG)
-                continue
-
-            if parse_result.show.rls_ignore_words and search.filter_release_name(curProper.name,
-                                                                                 parse_result.show.rls_ignore_words):
-                logger.log(
-                    u"Ignoring " + curProper.name + " based on ignored words filter: " + parse_result.show.rls_ignore_words,
-                    logger.MESSAGE)
-                continue
-
-            if parse_result.show.rls_require_words and not search.filter_release_name(curProper.name,
-                                                                                      parse_result.show.rls_require_words):
-                logger.log(
-                    u"Ignoring " + curProper.name + " based on required words filter: " + parse_result.show.rls_require_words,
-                    logger.MESSAGE)
-                continue
 
             # check if we actually want this proper (if it's the right quality)
             myDB = db.DBConnection()
@@ -216,8 +204,8 @@ class ProperFinder():
             # make sure the episode has been downloaded before
             myDB = db.DBConnection()
             historyResults = myDB.select(
-                "SELECT resource FROM history "
-                "WHERE showid = ? AND season = ? AND episode = ? AND quality = ? AND date >= ? "
+                "SELECT resource FROM history " +
+                "WHERE showid = ? AND season = ? AND episode = ? AND quality = ? AND date >= ? " +
                 "AND action IN (" + ",".join([str(x) for x in Quality.SNATCHED]) + ")",
                 [curProper.indexerid, curProper.season, curProper.episode, curProper.quality,
                  historyLimit.strftime(history.dateFormat)])
@@ -252,9 +240,11 @@ class ProperFinder():
 
                 # make the result object
                 result = curProper.provider.getResult([epObj])
+                result.show = curProper.show
                 result.url = curProper.url
                 result.name = curProper.name
                 result.quality = curProper.quality
+                result.release_group = curProper.release_group
                 result.version = curProper.version
 
                 # snatch it

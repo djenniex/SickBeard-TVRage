@@ -47,7 +47,7 @@ $(document).ready(function(){
         beforeSubmit: function(){
             $('.config_submitter').each(function(){
                 $(this).attr("disabled", "disabled");
-                $(this).after('<div id="wrap"><div class="spinner"></div><div class="item"> Saving...</div></div>');
+                $(this).after('<span><img src="' + sbRoot + '/images/loading16' + themeSpinner + '.gif"> Saving...</span>');
                 $(this).hide();
             });
         },
@@ -58,7 +58,7 @@ $(document).ready(function(){
 
     $('#api_key').click(function(){ $('#api_key').select() });
     $("#generate_new_apikey").click(function(){
-        $.get(sbRoot + '/config/general/generateKey', 
+        $.get(sbRoot + '/config/general/generateApiKey',
             function(data){
                 if (data.error != undefined) {
                     alert(data.error);

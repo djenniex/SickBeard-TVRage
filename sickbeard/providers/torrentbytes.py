@@ -39,12 +39,6 @@ from sickbeard.helpers import sanitizeSceneName
 
 
 class TorrentBytesProvider(generic.TorrentProvider):
-    urls = {'base_url': 'https://www.torrentbytes.net',
-            'login': 'https://www.torrentbytes.net/takelogin.php',
-            'detail': 'https://www.torrentbytes.net/details.php?id=%s',
-            'search': 'https://www.torrentbytes.net/browse.php?search=%s%s',
-            'download': 'https://www.torrentbytes.net/download.php?id=%s&name=%s',
-    }
 
     def __init__(self):
 
@@ -60,6 +54,13 @@ class TorrentBytesProvider(generic.TorrentProvider):
         self.minleech = None
 
         self.cache = TorrentBytesCache(self)
+
+        self.urls = {'base_url': 'https://www.torrentbytes.net',
+                'login': 'https://www.torrentbytes.net/takelogin.php',
+                'detail': 'https://www.torrentbytes.net/details.php?id=%s',
+                'search': 'https://www.torrentbytes.net/browse.php?search=%s%s',
+                'download': 'https://www.torrentbytes.net/download.php?id=%s&name=%s',
+                }
 
         self.url = self.urls['base_url']
 
@@ -139,7 +140,7 @@ class TorrentBytesProvider(generic.TorrentProvider):
             for show_name in set(show_name_helpers.allPossibleShowNames(self.show)):
                 ep_string = show_name_helpers.sanitizeSceneName(show_name) + ' ' + \
                             sickbeard.config.naming_ep_type[2] % {'seasonnumber': ep_obj.scene_season,
-                                                                  'episodenumber': ep_obj.scene_episode}
+                                                                  'episodenumber': ep_obj.scene_episode} + ' %s' % add_string
 
                 search_string['Episode'].append(re.sub('\s+', ' ', ep_string))
 
@@ -151,7 +152,7 @@ class TorrentBytesProvider(generic.TorrentProvider):
         items = {'Season': [], 'Episode': [], 'RSS': []}
 
         if not self._doLogin():
-            return []
+            return results
 
         for mode in search_params.keys():
             for search_string in search_params[mode]:
@@ -276,7 +277,7 @@ class TorrentBytesCache(tvcache.TVCache):
 
     def _getRSSData(self):
         search_params = {'RSS': ['']}
-        return self.provider._doSearch(search_params)
+        return {'entries': self.provider._doSearch(search_params)}
 
 
 provider = TorrentBytesProvider()

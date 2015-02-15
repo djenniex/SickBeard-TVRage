@@ -18,8 +18,9 @@
 
 import sickbeard
 from sickbeard import logger
-from lib.trakt import *
-
+from sickbeard.exceptions import ex
+from lib.trakt import TraktAPI
+from lib.trakt.exceptions import traktException, traktServerBusy, traktAuthException
 
 class TraktNotifier:
     """
@@ -34,7 +35,7 @@ class TraktNotifier:
 
     def notify_subtitle_download(self, ep_name, lang):
         pass
-        
+
     def notify_git_update(self, new_version):
         pass
 
@@ -45,61 +46,68 @@ class TraktNotifier:
         ep_obj: The TVEpisode object to add to trakt
         """
 
+        trakt_id = sickbeard.indexerApi(ep_obj.show.indexer).config['trakt_id']
+        trakt_api = TraktAPI(sickbeard.TRAKT_API, sickbeard.TRAKT_USERNAME, sickbeard.TRAKT_PASSWORD)
+
         if sickbeard.USE_TRAKT:
+            try:
+                # URL parameters
+                data = {
+                    'title': ep_obj.show.name,
+                    'year': ep_obj.show.startyear,
+                    'episodes': [{
+                                     'season': ep_obj.season,
+                                     'episode': ep_obj.episode
+                                 }]
+                }
 
-            # URL parameters
-            data = {
-                'tvdb_id': ep_obj.show.indexerid,
-                'title': ep_obj.show.name,
-                'year': ep_obj.show.startyear,
-                'episodes': [{
-                                 'season': ep_obj.season,
-                                 'episode': ep_obj.episode
-                             }]
-            }
+                if trakt_id == 'tvdb_id':
+                    data[trakt_id] = ep_obj.show.indexerid
 
-            if data is not None:
-                TraktCall("show/episode/library/%API%", self._api(), self._username(), self._password(), data)
+                # update library
+                trakt_api.traktRequest("show/episode/library/%APIKEY%", data, method='POST')
+
+                # remove from watchlist
                 if sickbeard.TRAKT_REMOVE_WATCHLIST:
-                    TraktCall("show/episode/unwatchlist/%API%", self._api(), self._username(), self._password(), data)
+                    trakt_api.traktRequest("show/episode/unwatchlist/%APIKEY%", data, method='POST')
 
                 if sickbeard.TRAKT_REMOVE_SERIESLIST:
-                    data_show = None
-
-                    # URL parameters, should not need to recheck data (done above)
                     data = {
                         'shows': [
                             {
-                                'tvdb_id': ep_obj.show.indexerid,
                                 'title': ep_obj.show.name,
                                 'year': ep_obj.show.startyear
                             }
                         ]
                     }
-                    
-                    TraktCall("show/unwatchlist/%API%", self._api(), self._username(), self._password(), data)
+
+                    if trakt_id == 'tvdb_id':
+                        data['shows'][0][trakt_id] = ep_obj.show.indexerid
+
+                    trakt_api.traktRequest("show/unwatchlist/%APIKEY%", data, method='POST')
 
                     # Remove all episodes from episode watchlist
                     # Start by getting all episodes in the watchlist
-                    watchlist = TraktCall("user/watchlist/episodes.json/%API%/" + sickbeard.TRAKT_USERNAME, sickbeard.TRAKT_API, sickbeard.TRAKT_USERNAME, sickbeard.TRAKT_PASSWORD)
+                    watchlist = trakt_api.traktRequest("user/watchlist/episodes.json/%APIKEY%/%USER%")
 
                     # Convert watchlist to only contain current show
-                    for show in watchlist:
-                        # Check if tvdb_id exists
-                        if 'tvdb_id' in show:
-                            if unicode(data['shows'][0]['tvdb_id']) == show['tvdb_id']:
+                    if watchlist:
+                        for show in watchlist:
+                            if show[trakt_id] == ep_obj.show.indexerid:
                                 data_show = {
                                     'title': show['title'],
-                                    'tvdb_id': show['tvdb_id'],
+                                    trakt_id: show[trakt_id],
                                     'episodes': []
                                 }
-                            
-                                # Add series and episode (number) to the arry
+
+                                # Add series and episode (number) to the array
                                 for episodes in show['episodes']:
                                     ep = {'season': episodes['season'], 'episode': episodes['number']}
                                     data_show['episodes'].append(ep)
-                    if data_show is not None:
-                        TraktCall("show/episode/unwatchlist/%API%", sickbeard.TRAKT_API, sickbeard.TRAKT_USERNAME, sickbeard.TRAKT_PASSWORD, data_show)
+
+                                trakt_api.traktRequest("show/episode/unwatchlist/%APIKEY%", data_show, method='POST')
+            except (traktException, traktAuthException, traktServerBusy) as e:
+                logger.log(u"Could not connect to Trakt service: %s" % ex(e), logger.WARNING)
 
     def test_notify(self, api, username, password):
         """
@@ -113,21 +121,14 @@ class TraktNotifier:
         Returns: True if the request succeeded, False otherwise
         """
 
-        data = TraktCall("account/test/%API%", api, username, password)
-        if data and data["status"] == "success":
-            return True
+        trakt_api = TraktAPI(api, username, password)
 
-    def _username(self):
-        return sickbeard.TRAKT_USERNAME
+        try:
+            if trakt_api.validateAccount():
+                return "Test notice sent successfully to Trakt"
+        except (traktException, traktAuthException, traktServerBusy) as e:
+            logger.log(u"Could not connect to Trakt service: %s" % ex(e), logger.WARNING)
 
-    def _password(self):
-        return sickbeard.TRAKT_PASSWORD
-
-    def _api(self):
-        return sickbeard.TRAKT_API
-
-    def _use_me(self):
-        return sickbeard.USE_TRAKT
-
+        return "Test notice failed to Trakt: %s" % ex(e)
 
 notifier = TraktNotifier

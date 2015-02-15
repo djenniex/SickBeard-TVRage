@@ -42,13 +42,6 @@ from sickbeard.helpers import sanitizeSceneName
 
 
 class NextGenProvider(generic.TorrentProvider):
-    urls = {'base_url': 'https://nxtgn.org/',
-            'search': 'https://nxtgn.org/browse.php?search=%s&cat=0&incldead=0&modes=%s',
-            'login_page': 'https://nxtgn.org/login.php',
-            'detail': 'https://nxtgn.org/details.php?id=%s',
-            'download': 'https://nxtgn.org/download.php?id=%s',
-            'takelogin': 'https://nxtgn.org/takelogin.php?csrf=',
-    }
 
     def __init__(self):
 
@@ -62,6 +55,14 @@ class NextGenProvider(generic.TorrentProvider):
         self.ratio = None
 
         self.cache = NextGenCache(self)
+
+        self.urls = {'base_url': 'https://nxtgn.org/',
+                'search': 'https://nxtgn.org/browse.php?search=%s&cat=0&incldead=0&modes=%s',
+                'login_page': 'https://nxtgn.org/login.php',
+                'detail': 'https://nxtgn.org/details.php?id=%s',
+                'download': 'https://nxtgn.org/download.php?id=%s',
+                'takelogin': 'https://nxtgn.org/takelogin.php?csrf=',
+                }
 
         self.url = self.urls['base_url']
 
@@ -178,7 +179,7 @@ class NextGenProvider(generic.TorrentProvider):
             for show_name in set(show_name_helpers.allPossibleShowNames(self.show)):
                 ep_string = show_name_helpers.sanitizeSceneName(show_name) + ' ' + \
                             sickbeard.config.naming_ep_type[2] % {'seasonnumber': ep_obj.scene_season,
-                                                                  'episodenumber': ep_obj.scene_episode}
+                                                                  'episodenumber': ep_obj.scene_episode} + ' %s' % add_string
 
                 search_string['Episode'].append(re.sub('\s+', ' ', ep_string))
 
@@ -190,7 +191,7 @@ class NextGenProvider(generic.TorrentProvider):
         items = {'Season': [], 'Episode': [], 'RSS': []}
 
         if not self._doLogin():
-            return []
+            return results
 
         for mode in search_params.keys():
 
@@ -320,7 +321,7 @@ class NextGenCache(tvcache.TVCache):
 
     def _getRSSData(self):
         search_params = {'RSS': ['']}
-        return self.provider._doSearch(search_params)
+        return {'entries': self.provider._doSearch(search_params)}
 
 
 provider = NextGenProvider()

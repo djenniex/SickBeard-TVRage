@@ -293,6 +293,10 @@ class QueueItemAdd(ShowQueueItem):
             self.show.scene = self.scene if self.scene != None else sickbeard.SCENE_DEFAULT
             self.show.paused = self.paused if self.paused != None else False
 
+            # set up default new/missing episode status
+            logger.log(u"Setting all episodes to the specified default status: " + str(self.show.default_ep_status))
+            self.show.default_ep_status = self.default_status
+
             # be smartish about this
             if self.show.genre and "talk show" in self.show.genre.lower():
                 self.show.air_by_date = 1
@@ -316,7 +320,7 @@ class QueueItemAdd(ShowQueueItem):
             return
 
         except exceptions.MultipleShowObjectsException:
-            logger.log(u"The show in " + self.showDir + " is already in your show list, skipping", logger.ERROR)
+            logger.log(u"The show in " + self.showDir + " is already in your show list, skipping", logger.WARNING)
             ui.notifications.error('Show skipped', "The show in " + self.showDir + " is already in your show list")
             self._finishEarly()
             return
@@ -331,7 +335,6 @@ class QueueItemAdd(ShowQueueItem):
         try:
             self.show.loadIMDbInfo()
         except imdb_exceptions.IMDbError, e:
-            #todo Insert UI notification
             logger.log(u" Something wrong on IMDb api: " + ex(e), logger.WARNING)
         except Exception, e:
             logger.log(u"Error loading IMDb info: " + ex(e), logger.ERROR)
@@ -364,17 +367,10 @@ class QueueItemAdd(ShowQueueItem):
             logger.log(u"Error searching dir for episodes: " + ex(e), logger.ERROR)
             logger.log(traceback.format_exc(), logger.DEBUG)
 
-        # if they gave a custom status then change all the eps to it
-        if self.default_status != SKIPPED:
-            logger.log(u"Setting all episodes to the specified default status: " + str(self.default_status))
-            myDB = db.DBConnection()
-            myDB.action("UPDATE tv_episodes SET status = ? WHERE status = ? AND showid = ? AND season != 0",
-                        [self.default_status, SKIPPED, self.show.indexerid])
-
-        # if they started with WANTED eps then run the backlog
-        if self.default_status == WANTED:
+        # if they set default ep status to WANTED then run the backlog to search for episodes
+        if self.show.default_ep_status == WANTED:
             logger.log(u"Launching backlog for this show since its episodes are WANTED")
-            sickbeard.backlogSearchScheduler.action.searchBacklog([self.show])  #@UndefinedVariable
+            sickbeard.backlogSearchScheduler.action.searchBacklog([self.show])
 
         self.show.writeMetadata()
         self.show.updateMetadata()
@@ -523,7 +519,7 @@ class QueueItemUpdate(ShowQueueItem):
         try:
             self.show.saveToDB()
         except Exception, e:
-            logger.log(u"Error saving the episode to the database: " + ex(e), logger.ERROR)
+            logger.log(u"Error saving show info to the database: " + ex(e), logger.ERROR)
             logger.log(traceback.format_exc(), logger.DEBUG)
 
         # get episode list from DB
@@ -539,31 +535,39 @@ class QueueItemUpdate(ShowQueueItem):
                 self.show.indexer).name + ", the show info will not be refreshed: " + ex(e), logger.ERROR)
             IndexerEpList = None
 
-        if IndexerEpList == None:
+        foundMissingEps = False
+        if IndexerEpList is None:
             logger.log(u"No data returned from " + sickbeard.indexerApi(
                 self.show.indexer).name + ", unable to update this show", logger.ERROR)
         else:
-            # for each ep we found on TVDB delete it from the DB list
+            # for each ep we found on the Indexer delete it from the DB list
             for curSeason in IndexerEpList:
                 for curEpisode in IndexerEpList[curSeason]:
                     logger.log(u"Removing " + str(curSeason) + "x" + str(curEpisode) + " from the DB list",
                                logger.DEBUG)
                     if curSeason in DBEpList and curEpisode in DBEpList[curSeason]:
                         del DBEpList[curSeason][curEpisode]
+                    else:
+                        # found missing episodes
+                        foundMissingEps = True
 
             # for the remaining episodes in the DB list just delete them from the DB
             for curSeason in DBEpList:
                 for curEpisode in DBEpList[curSeason]:
                     logger.log(u"Permanently deleting episode " + str(curSeason) + "x" + str(
-                        curEpisode) + " from the database", logger.MESSAGE)
+                        curEpisode) + " from the database", logger.INFO)
                     curEp = self.show.getEpisode(curSeason, curEpisode)
                     try:
                         curEp.deleteEpisode()
                     except exceptions.EpisodeDeletedException:
                         pass
 
-        sickbeard.showQueueScheduler.action.refreshShow(self.show, self.force)
+        # if they set default ep status to WANTED then run the backlog
+        if foundMissingEps and self.show.default_ep_status == WANTED:
+            logger.log(u"Launching backlog for this show since we found missing episodes")
+            sickbeard.backlogSearchScheduler.action.searchBacklog([self.show])
 
+        sickbeard.showQueueScheduler.action.refreshShow(self.show, self.force)
 
 class QueueItemForceUpdate(QueueItemUpdate):
     def __init__(self, show=None):

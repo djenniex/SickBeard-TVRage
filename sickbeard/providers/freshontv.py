@@ -39,12 +39,6 @@ from sickbeard.helpers import sanitizeSceneName
 
 
 class FreshOnTVProvider(generic.TorrentProvider):
-    urls = {'base_url': 'http://freshon.tv/',
-            'login': 'http://freshon.tv/login.php?action=makelogin',
-            'detail': 'http://freshon.tv/details.php?id=%s',
-            'search': 'http://freshon.tv/browse.php?incldead=%s&words=0&cat=0&search=%s',
-            'download': 'http://freshon.tv/download.php?id=%s&type=torrent',
-    }
 
     def __init__(self):
 
@@ -64,7 +58,15 @@ class FreshOnTVProvider(generic.TorrentProvider):
 
         self.cache = FreshOnTVCache(self)
 
+        self.urls = {'base_url': 'http://freshon.tv/',
+                'login': 'http://freshon.tv/login.php?action=makelogin',
+                'detail': 'http://freshon.tv/details.php?id=%s',
+                'search': 'http://freshon.tv/browse.php?incldead=%s&words=0&cat=0&search=%s',
+                'download': 'http://freshon.tv/download.php?id=%s&type=torrent',
+                }
+
         self.url = self.urls['base_url']
+
         self.cookies = None
 
     def isEnabled(self):
@@ -90,9 +92,7 @@ class FreshOnTVProvider(generic.TorrentProvider):
             return True
 
         if self._uid and self._hash:
-
-           requests.utils.add_dict_to_cookiejar(self.session.cookies, self.cookies)
-
+            requests.utils.add_dict_to_cookiejar(self.session.cookies, self.cookies)
         else:
             login_params = {'username': self.username,
                             'password': self.password,
@@ -109,10 +109,11 @@ class FreshOnTVProvider(generic.TorrentProvider):
                 return False
 
             if re.search('Username does not exist in the userbase or the account is not confirmed yet.', response.text):
-               logger.log(u'Invalid username or password for ' + self.name + ' Check your settings', logger.ERROR)
-               return False
+                logger.log(u'Invalid username or password for ' + self.name + ' Check your settings', logger.ERROR)
+                return False
 
-            if requests.utils.dict_from_cookiejar(self.session.cookies)['uid'] and requests.utils.dict_from_cookiejar(self.session.cookies)['pass']:
+            try:
+                if requests.utils.dict_from_cookiejar(self.session.cookies)['uid'] and requests.utils.dict_from_cookiejar(self.session.cookies)['pass']:
                     self._uid = requests.utils.dict_from_cookiejar(self.session.cookies)['uid']
                     self._hash = requests.utils.dict_from_cookiejar(self.session.cookies)['pass']
 
@@ -120,9 +121,11 @@ class FreshOnTVProvider(generic.TorrentProvider):
                                     'pass': self._hash
                     }
                     return True
-            else:
-                    logger.log(u'Unable to obtain cookie for FreshOnTV', logger.ERROR)
-                    return False
+            except:
+                pass
+
+            logger.log(u'Unable to obtain cookie for FreshOnTV', logger.ERROR)
+            return False
 
     def _get_season_search_strings(self, ep_obj):
 
@@ -166,7 +169,7 @@ class FreshOnTVProvider(generic.TorrentProvider):
             for show_name in set(show_name_helpers.allPossibleShowNames(self.show)):
                 ep_string = show_name_helpers.sanitizeSceneName(show_name) + ' ' + \
                             sickbeard.config.naming_ep_type[2] % {'seasonnumber': ep_obj.scene_season,
-                                                                  'episodenumber': ep_obj.scene_episode}
+                                                                  'episodenumber': ep_obj.scene_episode} + ' %s' % add_string
 
                 search_string['Episode'].append(re.sub('\s+', ' ', ep_string))
 
@@ -180,7 +183,7 @@ class FreshOnTVProvider(generic.TorrentProvider):
         freeleech = '3' if self.freeleech else '0'
 
         if not self._doLogin():
-            return []
+            return results
 
         for mode in search_params.keys():
             for search_string in search_params[mode]:
@@ -260,6 +263,10 @@ class FreshOnTVProvider(generic.TorrentProvider):
 
         title, url, id, seeders, leechers = item
 
+        if title:
+            title = u'' + title
+            title = title.replace(' ', '.')
+
         if url:
             url = str(url).replace('&amp;', '&')
 
@@ -308,6 +315,6 @@ class FreshOnTVCache(tvcache.TVCache):
 
     def _getRSSData(self):
         search_params = {'RSS': ['']}
-        return self.provider._doSearch(search_params)
+        return {'entries': self.provider._doSearch(search_params)}
 
 provider = FreshOnTVProvider()

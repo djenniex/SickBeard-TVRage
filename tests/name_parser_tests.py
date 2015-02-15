@@ -3,6 +3,7 @@ import unittest
 import test_lib as test
 
 import sys, os.path
+
 sys.path.append(os.path.abspath('..'))
 sys.path.append(os.path.abspath('../lib'))
 
@@ -162,7 +163,12 @@ class UnicodeTests(test.SickbeardTestDBCase):
     
     def _test_unicode(self, name, result):
         np = parser.NameParser(True)
-        parse_result = np.parse(name)
+
+        try:
+            parse_result = np.parse(name)
+        except parser.InvalidShowException:
+            return False
+
         # this shouldn't raise an exception
         a = repr(str(parse_result))
     
@@ -176,7 +182,7 @@ class FailureCaseTests(test.SickbeardTestDBCase):
         np = parser.NameParser(True)
         try:
             parse_result = np.parse(name)
-        except parser.InvalidNameException:
+        except (parser.InvalidNameException, parser.InvalidShowException):
             return True
         
         if VERBOSE:
@@ -196,7 +202,11 @@ class ComboTests(test.SickbeardTestDBCase):
             print 'Testing', name 
         
         np = parser.NameParser(True)
-        test_result = np.parse(name)
+
+        try:
+            test_result = np.parse(name)
+        except parser.InvalidShowException:
+            return False
         
         if DEBUG:
             print test_result, test_result.which_regex

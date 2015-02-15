@@ -25,6 +25,7 @@ import signal
 import sys
 import shutil
 import subprocess
+import traceback
 
 if sys.version_info < (2, 6):
     print "Sorry, requires Python 2.6 or 2.7."
@@ -32,7 +33,6 @@ if sys.version_info < (2, 6):
 
 try:
     import Cheetah
-
     if Cheetah.Version[0] != '2':
         raise ValueError
 except ValueError:
@@ -44,7 +44,7 @@ except:
 
 import os
 
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), 'lib')))
+sys.path.insert(1, os.path.abspath(os.path.join(os.path.dirname(__file__), 'lib')))
 
 # We only need this for compiling an EXE and I will just always do that on 2.6+
 if sys.hexversion >= 0x020600F0:
@@ -56,7 +56,7 @@ import threading
 import getopt
 
 import sickbeard
-from sickbeard import db, logger, network_timezones, failed_history, name_cache, versionChecker
+from sickbeard import db, logger, network_timezones, failed_history, name_cache
 from sickbeard.tv import TVShow
 from sickbeard.webserveInit import SRWebServer
 from sickbeard.databases.mainDB import MIN_DB_VERSION, MAX_DB_VERSION
@@ -127,8 +127,7 @@ class SickRage(object):
         sickbeard.SYS_ENCODING = None
 
         try:
-            locale.setlocale(locale.LC_ALL, "UTF-8")
-            locale.setlocale(locale.LC_CTYPE, "UTF-8")
+            locale.setlocale(locale.LC_ALL, "")
             sickbeard.SYS_ENCODING = locale.getpreferredencoding()
         except (locale.Error, IOError):
             pass
@@ -145,9 +144,8 @@ class SickRage(object):
             # On non-unicode builds this will raise an AttributeError, if encoding type is not valid it throws a LookupError
             sys.setdefaultencoding(sickbeard.SYS_ENCODING)
         except:
-            print 'Sorry, you MUST add the SickRage folder to the PYTHONPATH environment variable'
-            print 'or find another way to force Python to use ' + sickbeard.SYS_ENCODING + ' for string encoding.'
-            sys.exit(1)
+            sys.exit("Sorry, you MUST add the SickRage folder to the PYTHONPATH environment variable\n" +
+                     "or find another way to force Python to use " + sickbeard.SYS_ENCODING + " for string encoding.")
 
         # Need console logging for SickBeard.py and SickBeard-console.exe
         self.consoleLogging = (not hasattr(sys, "frozen")) or (sickbeard.MY_NAME.lower().find('-console') > 0)
@@ -257,35 +255,21 @@ class SickRage(object):
                 raise SystemExit(
                     "Config file root dir '" + os.path.dirname(sickbeard.CONFIG_FILE) + "' must be writeable.")
 
-        # Check if we need to perform a restore first
-        restoreDir = os.path.join(sickbeard.DATA_DIR, 'restore')
-        if os.path.exists(restoreDir):
-            if self.restore(restoreDir, sickbeard.DATA_DIR):
-                logger.log(u"Restore successful...")
-            else:
-                logger.log(u"Restore FAILED!", logger.ERROR)
-
         os.chdir(sickbeard.DATA_DIR)
 
+        # Check if we need to perform a restore first
+        restoreDir = os.path.join(sickbeard.DATA_DIR, 'restore')
+        if self.consoleLogging and os.path.exists(restoreDir):
+            if self.restore(restoreDir, sickbeard.DATA_DIR):
+                sys.stdout.write("Restore successful...\n")
+            else:
+                sys.stdout.write("Restore FAILED!\n")
+
         # Load the config and publish it to the sickbeard package
-        if not os.path.isfile(sickbeard.CONFIG_FILE):
-            logger.log(u"Unable to find '" + sickbeard.CONFIG_FILE + "' , all settings will be default!", logger.ERROR)
+        if self.consoleLogging and not os.path.isfile(sickbeard.CONFIG_FILE):
+            sys.stdout.write("Unable to find '" + sickbeard.CONFIG_FILE + "' , all settings will be default!" + "\n")
 
         sickbeard.CFG = ConfigObj(sickbeard.CONFIG_FILE)
-
-        CUR_DB_VERSION = db.DBConnection().checkDBVersion()
-
-        if CUR_DB_VERSION > 0:
-            if CUR_DB_VERSION < MIN_DB_VERSION:
-                raise SystemExit("Your database version (" + str(
-                    CUR_DB_VERSION) + ") is too old to migrate from with this version of SickRage (" + str(
-                    MIN_DB_VERSION) + ").\n" + \
-                                 "Upgrade using a previous version of SB first, or start with no database file to begin fresh.")
-            if CUR_DB_VERSION > MAX_DB_VERSION:
-                raise SystemExit("Your database version (" + str(
-                    CUR_DB_VERSION) + ") has been incremented past what this version of SickRage supports (" + str(
-                    MAX_DB_VERSION) + ").\n" + \
-                                 "If you have used other forks of SB, your database may be unusable due to their modifications.")
 
         # Initialize the config and our threads
         sickbeard.initialize(consoleLogging=self.consoleLogging)
@@ -344,7 +328,7 @@ class SickRage(object):
                        logger.ERROR)
             if sickbeard.LAUNCH_BROWSER and not self.runAsDaemon:
                 logger.log(u"Launching browser and exiting", logger.ERROR)
-                sickbeard.launchBrowser(self.startPort)
+                sickbeard.launchBrowser('https' if sickbeard.ENABLE_HTTPS else 'http', self.startPort, sickbeard.WEB_ROOT)
             os._exit(1)
 
         if self.consoleLogging:
@@ -369,7 +353,7 @@ class SickRage(object):
 
         # Launch browser
         if sickbeard.LAUNCH_BROWSER and not (self.noLaunch or self.runAsDaemon):
-            sickbeard.launchBrowser(self.startPort)
+            sickbeard.launchBrowser('https' if sickbeard.ENABLE_HTTPS else 'http', self.startPort, sickbeard.WEB_ROOT)
 
         # main loop
         while (True):
@@ -455,9 +439,9 @@ class SickRage(object):
                 sickbeard.showList.append(curShow)
             except Exception, e:
                 logger.log(
-                    u"There was an error creating the show in " + sqlShow["location"] + ": " + str(e).decode('utf-8',
-                                                                                                             'replace'),
+                    u"There was an error creating the show in " + sqlShow["location"] + ": " + str(e).decode('utf-8'),
                     logger.ERROR)
+                logger.log(traceback.format_exc(), logger.DEBUG)
 
     def restore(self, srcDir, dstDir):
         try:
@@ -507,7 +491,7 @@ class SickRage(object):
                         popen_list = [os.path.join(sickbeard.PROG_DIR, 'updater.exe'), str(sickbeard.PID),
                                       sys.executable]
                     else:
-                        logger.log(u"Unknown SB launch method, please file a bug report about this", logger.ERROR)
+                        logger.log(u"Unknown SR launch method, please file a bug report about this", logger.ERROR)
                         popen_list = [sys.executable, os.path.join(sickbeard.PROG_DIR, 'updater.py'),
                                       str(sickbeard.PID),
                                       sys.executable,
@@ -518,7 +502,6 @@ class SickRage(object):
                     if '--nolaunch' not in popen_list:
                         popen_list += ['--nolaunch']
                     logger.log(u"Restarting SickRage with " + str(popen_list))
-                    logger.close()
                     subprocess.Popen(popen_list, cwd=os.getcwd())
 
         # system exit
