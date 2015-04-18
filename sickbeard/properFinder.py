@@ -41,10 +41,6 @@ class ProperFinder():
         self.amActive = False
 
     def run(self, force=False):
-
-        if not sickbeard.DOWNLOAD_PROPERS:
-            return
-
         logger.log(u"Beginning the search for new propers")
 
         self.amActive = True
@@ -243,6 +239,7 @@ class ProperFinder():
                 result.quality = curProper.quality
                 result.release_group = curProper.release_group
                 result.version = curProper.version
+                result.content = curProper.content
 
                 # snatch it
                 search.snatchEpisode(result, SNATCHED_PROPER)

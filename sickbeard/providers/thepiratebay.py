@@ -122,7 +122,9 @@ class ThePirateBayProvider(generic.TorrentProvider):
         filesList = re.findall('<td.+>(.*?)</td>', data)
 
         if not filesList:
-            logger.log(u"Unable to get the torrent file list for " + title, logger.ERROR)
+            # disabled errormsg for now
+            # logger.log(u"Unable to get the torrent file list for " + title, logger.ERROR)
+            return None
 
         videoFiles = filter(lambda x: x.rpartition(".")[2].lower() in mediaExtensions, filesList)
 
@@ -216,7 +218,7 @@ class ThePirateBayProvider(generic.TorrentProvider):
 
         return [search_string]
 
-    def _doSearch(self, search_params, search_mode='eponly', epcount=0, age=0):
+    def _doSearch(self, search_params, search_mode='eponly', epcount=0, age=0, epObj=None):
 
         results = []
         items = {'Season': [], 'Episode': [], 'RSS': []}
@@ -281,6 +283,7 @@ class ThePirateBayProvider(generic.TorrentProvider):
 
         if title:
             title = u'' + title.replace(' ', '.')
+            title = self._clean_title_from_provider(title)
 
         if url:
             url = url.replace('&amp;', '&')

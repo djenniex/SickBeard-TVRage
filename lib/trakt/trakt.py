@@ -10,7 +10,7 @@ class TraktAPI():
         self.password = password
         self.verify = not disable_ssl_verify
         self.timeout = timeout if timeout else None
-        self.api_url = 'https://api.trakt.tv/'
+        self.api_url = 'https://api-v2launch.trakt.tv/'
         self.headers = {
           'Content-Type': 'application/json',
           'trakt-api-version': '2',
@@ -29,7 +29,7 @@ class TraktAPI():
                 data=json.dumps(data), timeout=self.timeout, verify=self.verify)
             resp.raise_for_status()
             resp = resp.json()
-        except (requests.HTTPError, requests.ConnectionError) as e:
+        except requests.RequestException as e:
             code = getattr(e.response, 'status_code', None)
             if not code:
                 # This is pretty much a fatal error if there is no status_code
@@ -40,8 +40,11 @@ class TraktAPI():
                 logger.log(u"Retrying trakt api request: auth/login", logger.WARNING)
                 return self.validateAccount()
             elif code == 401:
+                logger.log(u"Unauthorized. Please check your Trakt settings", logger.WARNING)
                 raise traktAuthException(e)
-            elif code == 503:
+            elif code in (500,501,503,504,520,521,522):
+                #http://docs.trakt.apiary.io/#introduction/status-codes
+                logger.log(u"Trakt may have some issues and it's unavailable. Try again later please", logger.WARNING)
                 raise traktServerBusy(e)
             else:
                 raise traktException(e)
@@ -68,7 +71,7 @@ class TraktAPI():
 
             # convert response to json
             resp = resp.json()
-        except (requests.HTTPError, requests.ConnectionError) as e:
+        except requests.RequestException as e:
             code = getattr(e.response, 'status_code', None)
             if not code:
                 # This is pretty much a fatal error if there is no status_code
@@ -79,8 +82,11 @@ class TraktAPI():
                 logger.log(u"Retrying trakt api request: %s" % path, logger.WARNING)
                 return self.traktRequest(path, data, method)
             elif code == 401:
+                logger.log(u"Unauthorized. Please check your Trakt settings", logger.WARNING)
                 raise traktAuthException(e)
-            elif code == 503:
+            elif code in (500,501,503,504,520,521,522):
+                #http://docs.trakt.apiary.io/#introduction/status-codes
+                logger.log(u"Trakt may have some issues and it's unavailable. Try again later please", logger.WARNING)
                 raise traktServerBusy(e)
             else:
                 raise traktException(e)
