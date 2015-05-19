@@ -26,7 +26,7 @@ import itertools
 import urllib
 
 import sickbeard
-import requests
+from lib import requests
 
 from sickbeard import helpers, classes, logger, db
 from sickbeard.common import MULTI_EP_RESULT, SEASON_RESULT, USER_AGENT
@@ -156,8 +156,9 @@ class GenericProvider:
 
                 urls = [
                     'http://torcache.net/torrent/' + torrent_hash + '.torrent',
-                    'http://zoink.ch/torrent/' + torrent_hash + '.torrent',
-                    'http://torrage.com/torrent/' + torrent_hash.lower() + '.torrent',
+                    #zoink.ch misconfigured, torrage.com domain expired.
+                    #'http://zoink.ch/torrent/' + torrent_hash + '.torrent',
+                    #'http://torrage.com/torrent/' + torrent_hash.lower() + '.torrent',
                 ]
             except:
                 urls = [result.url]
