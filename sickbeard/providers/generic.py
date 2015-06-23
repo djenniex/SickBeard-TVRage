@@ -146,6 +146,7 @@ class GenericProvider:
         if self.providerType == GenericProvider.TORRENT:
             try:
                 torrent_hash = re.findall('urn:btih:([\w]{32,40})', result.url)[0].upper()
+                torrent_name = re.findall('dn=([^&]+)', result.url)[0]
 
                 if len(torrent_hash) == 32:
                     torrent_hash = b16encode(b32decode(torrent_hash)).upper()
@@ -156,9 +157,8 @@ class GenericProvider:
 
                 urls = [
                     'http://torcache.net/torrent/' + torrent_hash + '.torrent',
-                    #zoink.ch misconfigured, torrage.com domain expired.
-                    #'http://zoink.ch/torrent/' + torrent_hash + '.torrent',
-                    #'http://torrage.com/torrent/' + torrent_hash.lower() + '.torrent',
+                    'http://zoink.ch/torrent/' + torrent_name + '.torrent',
+                    'http://torrage.com/torrent/' + torrent_hash + '.torrent',
                 ]
             except:
                 urls = [result.url]
@@ -174,18 +174,21 @@ class GenericProvider:
             return
 
         for url in urls:
+            logger.log(u"Downloading a result from " + self.name + " at " + url)
             if helpers.download_file(url, filename, session=self.session):
-                logger.log(u"Downloading a result from " + self.name + " at " + url)
-
-                if self.providerType == GenericProvider.TORRENT:
-                    logger.log(u"Saved magnet link to " + filename, logger.INFO)
-                else:
-                    logger.log(u"Saved result to " + filename, logger.INFO)
-
                 if self._verify_download(filename):
+                    if self.providerType == GenericProvider.TORRENT:
+                        logger.log(u"Saved magnet link to " + filename, logger.INFO)
+                    else:
+                        logger.log(u"Saved result to " + filename, logger.INFO)
                     return True
+                else:
+                    logger.log(u"Could not download %s" % url, logger.WARNING)
+                    helpers._remove_file_failed(filename)
 
-        logger.log(u"Failed to download result", logger.WARNING)
+        if len(urls):
+            logger.log(u"Failed to download any results", logger.WARNING)
+
         return False
 
     def _verify_download(self, file_name=None):
@@ -208,7 +211,7 @@ class GenericProvider:
             except Exception as e:
                 logger.log(u"Failed to validate torrent file: " + ex(e), logger.DEBUG)
 
-            logger.log(u"Result is not a valid torrent file", logger.WARNING)
+            logger.log(u"Result is not a valid torrent file", logger.DEBUG)
             return False
 
         return True
@@ -497,31 +500,11 @@ class TorrentProvider(GenericProvider):
         GenericProvider.__init__(self, name)
 
         self.providerType = GenericProvider.TORRENT
-        
-        # Don't add a rule to remove everything between bracket, it will break anime release
-        self.removeWordsList = {'\[rartv\]$': 'searchre',
-                               '\[rarbg\]$': 'searchre',
-                               '\[eztv\]$': 'searchre',
-                               '\[ettv\]$': 'searchre',
-                               '\[GloDLS\]$': 'searchre',
-                               '\[silv4\]$': 'searchre',
-                               '\[Seedbox\]$': 'searchre',
-                               '\[AndroidTwoU\]$': 'searchre',
-                               '\.RiPSaLoT$': 'searchre',
-                              }
 
     def _clean_title_from_provider(self, title):
-        torrent_title = title
-        for remove_string, remove_type in self.removeWordsList.iteritems():
-            if remove_type == 'search':
-                torrent_title = torrent_title.replace(remove_string, '')
-            elif remove_type == 'searchre':
-                torrent_title = re.sub(remove_string, '', torrent_title)
-
-        if torrent_title != title:
-            logger.log(u'Change title from {old_name} to {new_name}'.format(old_name=title, new_name=torrent_title), logger.DEBUG)
-
-        return torrent_title
+        if title:
+            title = u'' + title.replace(' ', '.')
+        return title
 
 
 class ProviderProxy:

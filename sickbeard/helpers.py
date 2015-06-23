@@ -106,12 +106,38 @@ def remove_non_release_groups(name):
     Remove non release groups from name
     """
 
-    if name and "-" in name:
-        name_group = name.rsplit('-', 1)
-        if name_group[-1].upper() in ["RP", "NZBGEEK"]:
-            name = name_group[0]
+    if not name:
+        return name
 
-    return name
+    # Do not remove all [....] suffixes, or it will break anime releases ## Need to verify this is true now
+    # Check your database for funky release_names and add them here, to improve failed handling, archiving, and history.
+    # select release_name from tv_episodes WHERE LENGTH(release_name);
+    # [eSc], [SSG], [GWC] are valid release groups for non-anime
+    removeWordsList = {'\[rartv\]$':       'searchre',
+                       '\[rarbg\]$':       'searchre',
+                       '\[eztv\]$':        'searchre',
+                       '\[ettv\]$':        'searchre',
+                       '\[vtv\]$':         'searchre',
+                       '\[GloDLS\]$':      'searchre',
+                       '\[silv4\]$':       'searchre',
+                       '\[Seedbox\]$':     'searchre',
+                       '\[AndroidTwoU\]$': 'searchre',
+                       '\.RiPSaLoT$':      'searchre',
+                       '-NZBGEEK$':        'searchre',
+                       '-RP$':             'searchre',
+                       '-20-40$':          'searchre',
+                       '^\[ www\.TorrentDay\.com \] - ': 'searchre',
+                       '^\[ www\.Cpasbien\.pw \] ': 'searchre',
+                      }
+
+    _name = name
+    for remove_string, remove_type in removeWordsList.iteritems():
+        if remove_type == 'search':
+            _name = _name.replace(remove_string, '')
+        elif remove_type == 'searchre':
+            _name = re.sub(r'(?i)' + remove_string, '', _name)
+
+    return _name.strip('.- ')
 
 
 def replaceExtension(filename, newExt):
@@ -133,6 +159,9 @@ def replaceExtension(filename, newExt):
     else:
         return sepFile[0] + "." + newExt
 
+
+def notTorNZBFile(filename):
+    return not (filename.endswith(".torrent") or filename.endswith(".nzb"))
 
 def isSyncFile(filename):
     extension = filename.rpartition(".")[2].lower()
@@ -669,41 +698,34 @@ def get_all_episodes_from_absolute_number(show, absolute_numbers, indexer_id=Non
     return (season, episodes)
 
 
-def sanitizeSceneName(name, ezrss=False, anime=False):
+def sanitizeSceneName(name, anime=False):
     """
     Takes a show name and returns the "scenified" version of it.
-
-    ezrss: If true the scenified version will follow EZRSS's cracksmoker rules as best as possible
     
     anime: Some show have a ' in their name(Kuroko's Basketball) and is needed for search.
 
     Returns: A string containing the scene version of the show name given.
     """
 
-    if name:
-        # anime: removed ' for Kuroko's Basketball
-        if anime:
-            bad_chars = u",:()!?\u2019"
-        # ezrss leaves : and ! in their show names as far as I can tell
-        elif ezrss:
-            bad_chars = u",()'?\u2019"
-        else:
-            bad_chars = u",:()'!?\u2019"
+    if not name:
+        return u''
 
-        # strip out any bad chars
-        for x in bad_chars:
-            name = name.replace(x, "")
+    bad_chars = u',:()!?\u2019'
+    if not anime:
+        bad_chars += u"'"
 
-        # tidy up stuff that doesn't belong in scene names
-        name = name.replace("- ", ".").replace(" ", ".").replace("&", "and").replace('/', '.')
-        name = re.sub("\.\.*", ".", name)
+    # strip out any bad chars
+    for x in bad_chars:
+        name = u'' + name.replace(x, "")
 
-        if name.endswith('.'):
-            name = name[:-1]
+    # tidy up stuff that doesn't belong in scene names
+    name = name.replace("- ", ".").replace(" ", ".").replace("&", "and").replace('/', '.')
+    name = re.sub("\.\.*", ".", name)
 
-        return name
-    else:
-        return ''
+    if name.endswith('.'):
+        name = name[:-1]
+
+    return name
 
 
 _binOps = {
@@ -1352,13 +1374,17 @@ def download_file(url, filename, session=None):
                 resp.status_code) + ': ' + codeDescription(resp.status_code), logger.DEBUG)
             return False
 
-        with open(filename, 'wb') as fp:
-            for chunk in resp.iter_content(chunk_size=1024):
-                if chunk:
-                    fp.write(chunk)
-                    fp.flush()
+        try:
+            with open(filename, 'wb') as fp:
+                for chunk in resp.iter_content(chunk_size=1024):
+                    if chunk:
+                        fp.write(chunk)
+                        fp.flush()
 
-        chmodAsParent(filename)
+            chmodAsParent(filename)
+        except:
+            logger.log(u"Problem setting permissions or writing file to: %s" % filename, logger.WARNING)
+
     except requests.exceptions.HTTPError, e:
         _remove_file_failed(filename)
         logger.log(u"HTTP error " + str(e.errno) + " while loading URL " + url, logger.WARNING)
@@ -1373,7 +1399,7 @@ def download_file(url, filename, session=None):
         return False
     except EnvironmentError, e:
         _remove_file_failed(filename)
-        logger.log(u"Unable to save the file: " + ex(e), logger.ERROR)
+        logger.log(u"Unable to save the file: " + ex(e), logger.WARNING)
         return False
     except Exception:
         _remove_file_failed(filename)
@@ -1388,7 +1414,7 @@ def clearCache(force=False):
 
     # clean out cache directory, remove everything > 12 hours old
     if sickbeard.CACHE_DIR:
-        logger.log(u"Trying to clean cache folder " + sickbeard.CACHE_DIR)
+        logger.log(u"Trying to clean cache folder " + sickbeard.CACHE_DIR, logger.DEBUG)
 
         # Does our cache_dir exists
         if not ek.ek(os.path.isdir, sickbeard.CACHE_DIR):
@@ -1519,7 +1545,7 @@ def verify_freespace(src, dest, oldfile=None):
 
     if not ek.ek(os.path.isfile, src):
         logger.log("A path to a file is required for the source. " + src + " is not a file.", logger.WARNING)
-        return False
+        return True
     
     try:
         diskfree = disk_usage(dest)
@@ -1555,3 +1581,36 @@ def pretty_time_delta(seconds):
         return '%s%02dm%02ds' % (sign_string, minutes, seconds)
     else:
         return '%s%02ds' % (sign_string, seconds)
+    
+def isFileLocked(file, writeLockCheck=False):
+    '''
+    Checks to see if a file is locked. Performs three checks
+        1. Checks if the file even exists
+        2. Attempts to open the file for reading. This will determine if the file has a write lock.
+            Write locks occur when the file is being edited or copied to, e.g. a file copy destination
+        3. If the readLockCheck parameter is True, attempts to rename the file. If this fails the 
+            file is open by some other process for reading. The file can be read, but not written to
+            or deleted.
+    @param file: the file being checked
+    @param writeLockCheck: when true will check if the file is locked for writing (prevents move operations)
+    '''
+    if(not(os.path.exists(file))):
+        return True
+    try:
+        f = open(file, 'r')
+        f.close()
+    except IOError:
+        return True
+    
+    if(writeLockCheck):
+        lockFile = file + ".lckchk"
+        if(os.path.exists(lockFile)):
+            os.remove(lockFile)
+        try:
+            os.rename(file, lockFile)
+            time.sleep(1)
+            os.rename(lockFile, file)
+        except (OSError, IOError):
+            return True
+           
+    return False
