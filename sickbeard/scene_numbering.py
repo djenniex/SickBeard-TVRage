@@ -30,7 +30,7 @@ import sickbeard
 try:
     import json
 except ImportError:
-    from lib import simplejson as json
+    import simplejson as json
 
 from sickbeard import logger
 from sickbeard import db
@@ -486,7 +486,7 @@ def xem_refresh(indexer_id, indexer, force=False):
 
     if refresh or force:
         logger.log(
-            u'Looking up XEM scene mapping using for show %s on %s' % (indexer_id, sickbeard.indexerApi(indexer).name,),
+            u'Looking up XEM scene mapping for show %s on %s' % (indexer_id, sickbeard.indexerApi(indexer).name,),
             logger.DEBUG)
 
         # mark refreshed
@@ -496,7 +496,8 @@ def xem_refresh(indexer_id, indexer, force=False):
                     {'indexer_id': indexer_id})
 
         try:
-            parsedJSON = sickbeard.helpers.getURL(url, json=True)
+            from .scene_exceptions import xem_session
+            parsedJSON = sickbeard.helpers.getURL(url, session=xem_session, json=True)
             if not parsedJSON or parsedJSON == '':
                 logger.log(u'No XEM data for show "%s on %s"' % (indexer_id, sickbeard.indexerApi(indexer).name,), logger.INFO)
                 return

@@ -32,13 +32,13 @@ from sickbeard import common
 
 from sickbeard import failedProcessor
 
-from lib.unrar2 import RarFile, RarInfo
-from lib.unrar2.rar_exceptions import *
+from unrar2 import RarFile, RarInfo
+from unrar2.rar_exceptions import *
 
 import shutil
-import lib.shutil_custom
+import shutil_custom
 
-shutil.copyfile = lib.shutil_custom.copyfile_custom
+shutil.copyfile = shutil_custom.copyfile_custom
 
 
 class ProcessResult:
@@ -437,10 +437,6 @@ def already_postprocessed(dirName, videofile, force, result):
     if force:
         return False
 
-    #Needed for accessing DB with a unicode DirName
-    if not isinstance(dirName, unicode):
-        dirName = unicode(dirName, 'utf_8')
-
     # Avoid processing the same dir again if we use a process method <> move
     myDB = db.DBConnection()
     sqlResult = myDB.select("SELECT * FROM tv_episodes WHERE release_name = ?", [dirName])
@@ -449,10 +445,6 @@ def already_postprocessed(dirName, videofile, force, result):
         return True
 
     else:
-        # This is needed for video whose name differ from dirName
-        if not isinstance(videofile, unicode):
-            videofile = unicode(videofile, 'utf_8')
-
         sqlResult = myDB.select("SELECT * FROM tv_episodes WHERE release_name = ?", [videofile.rpartition('.')[0]])
         if sqlResult:
             #result.output += logHelper(u"You're trying to post process a video that's already been processed, skipping", logger.DEBUG)
@@ -460,7 +452,7 @@ def already_postprocessed(dirName, videofile, force, result):
         
         #Needed if we have downloaded the same episode @ different quality
         #But we need to make sure we check the history of the episode we're going to PP, and not others
-        np = NameParser(dirName, tryIndexers=True, trySceneExceptions=True, convert=True)
+        np = NameParser(dirName, tryIndexers=True, trySceneExceptions=True)
         try: #if it fails to find any info (because we're doing an unparsable folder (like the TV root dir) it will throw an exception, which we want to ignore
             parse_result = np.parse(dirName)
         except: #ignore the exception, because we kind of expected it, but create parse_result anyway so we can perform a check on it.

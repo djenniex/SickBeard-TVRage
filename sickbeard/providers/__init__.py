@@ -34,7 +34,10 @@ __all__ = ['womble',
            'animenzb',
            'torrentbytes',
            'animezb',
+           'frenchtorrentdb',
            'freshontv',
+           'titansoftv',
+           'libertalia',
            'morethantv',
            'bitsoup',
            't411',
@@ -44,7 +47,11 @@ __all__ = ['womble',
            'rarbg',
            'tntvillage',
            'binsearch',
+           'bluetigers',
+           'cpasbien',
+           'fnt',
            'scenetime',
+           'btdigg',
 ]
 
 import sickbeard
@@ -63,6 +70,11 @@ def sortedProviderList(randomize=False):
     # add all modules in the priority list, in order
     for curModule in sickbeard.PROVIDER_ORDER:
         if curModule in providerDict:
+            newList.append(providerDict[curModule])
+
+    # add all enabled providers first
+    for curModule in providerDict:
+        if providerDict[curModule] not in newList and providerDict[curModule].isEnabled():
             newList.append(providerDict[curModule])
 
     # add any modules that are missing from that list
@@ -201,8 +213,12 @@ def makeTorrentRssProvider(configString):
 
 
 def getDefaultNewznabProviders():
-    return 'Sick Beard Index|http://lolo.sickbeard.com/|0|5030,5040|0|eponly|0|0|0!!!NZBs.org|https://nzbs.org/||5030,5040|0|eponly|0|0|0!!!Usenet-Crawler|https://www.usenet-crawler.com/||5030,5040|0|eponly|0|0|0'
-
+    #name|url|key|catIDs|enabled|search_mode|search_fallback|enable_daily|enable_backlog
+    return 'NZB.Cat|https://nzb.cat/||5030,5040,5010|0|eponly|1|1|1!!!' + \
+           'NZBGeek|https://api.nzbgeek.info/||5030,5040|0|eponly|0|0|0!!!' + \
+           'Sick Beard Index|http://lolo.sickbeard.com/|0|5030,5040|0|eponly|0|0|0!!!' + \
+           'NZBs.org|https://nzbs.org/||5030,5040|0|eponly|0|0|0!!!' + \
+           'Usenet-Crawler|https://www.usenet-crawler.com/||5030,5040|0|eponly|0|0|0'
 
 def getProviderModule(name):
     name = name.lower()

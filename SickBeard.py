@@ -29,10 +29,13 @@ import sys
 import subprocess
 import traceback
 
-import shutil
-import lib.shutil_custom
+import os
+sys.path.insert(1, os.path.abspath(os.path.join(os.path.dirname(__file__), 'lib')))
 
-shutil.copyfile = lib.shutil_custom.copyfile_custom
+import shutil
+import shutil_custom
+
+shutil.copyfile = shutil_custom.copyfile_custom
 
 if sys.version_info < (2, 6):
     print "Sorry, requires Python 2.6 or 2.7."
@@ -49,13 +52,17 @@ except:
     print "The Python module Cheetah is required"
     sys.exit(1)
 
-import os
-
-sys.path.insert(1, os.path.abspath(os.path.join(os.path.dirname(__file__), 'lib')))
-
 # We only need this for compiling an EXE and I will just always do that on 2.6+
 if sys.hexversion >= 0x020600F0:
     from multiprocessing import freeze_support  # @UnresolvedImport
+
+
+import certifi
+for env_cert_var in ['REQUESTS_CA_BUNDLE', 'CURL_CA_BUNDLE']:
+    ca_cert_loc = os.environ.get(env_cert_var)
+    if (not isinstance(ca_cert_loc, basestring)) or (not os.path.isfile(ca_cert_loc)):
+        os.environ[env_cert_var] = certifi.where()
+
 
 if sys.version_info >= (2, 7, 9):
     import ssl
@@ -85,7 +92,7 @@ from sickbeard.tv import TVShow
 from sickbeard.webserveInit import SRWebServer
 from sickbeard.databases.mainDB import MIN_DB_VERSION, MAX_DB_VERSION
 from sickbeard.event_queue import Events
-from lib.configobj import ConfigObj
+from configobj import ConfigObj
 
 throwaway = datetime.datetime.strptime('20110101', '%Y%m%d')
 
@@ -351,27 +358,19 @@ class SickRage(object):
         }
 
         # start web server
-        try:
-            self.webserver = SRWebServer(self.web_options)
-            self.webserver.start()
-        except IOError:
-            logger.log(u"Unable to start web server, is something else running on port %d?" % self.startPort,
-                       logger.ERROR)
-            if sickbeard.LAUNCH_BROWSER and not self.runAsDaemon:
-                logger.log(u"Launching browser and exiting", logger.ERROR)
-                sickbeard.launchBrowser('https' if sickbeard.ENABLE_HTTPS else 'http', self.startPort, sickbeard.WEB_ROOT)
-            os._exit(1)
+        self.webserver = SRWebServer(self.web_options)
+        self.webserver.start()
 
         if self.consoleLogging:
             print "Starting up SickRage " + sickbeard.BRANCH + " from " + sickbeard.CONFIG_FILE
 
         # Fire up all our threads
         sickbeard.start()
-
+        
         # Build internal name cache
         name_cache.buildNameCache()
 
-        # refresh network timezones
+        # Prepopulate network timezones, it isn't thread safe
         network_timezones.update_network_dict()
 
         # sure, why not?
@@ -460,7 +459,7 @@ class SickRage(object):
         logger.log(u"Loading initial show list", logger.DEBUG)
 
         myDB = db.DBConnection()
-        sqlResults = myDB.select("SELECT * FROM tv_shows")
+        sqlResults = myDB.select("SELECT * FROM tv_shows;")
 
         sickbeard.showList = []
         for sqlShow in sqlResults:
@@ -473,6 +472,7 @@ class SickRage(object):
                     u"There was an error creating the show in " + sqlShow["location"] + ": " + str(e).decode('utf-8'),
                     logger.ERROR)
                 logger.log(traceback.format_exc(), logger.DEBUG)
+
 
     def restoreDB(self, srcDir, dstDir):
         try:

@@ -28,6 +28,8 @@ from sickbeard import name_cache
 from sickbeard import logger
 from sickbeard import db
 from sickbeard import encodingKludge as ek
+import os
+import requests
 
 exception_dict = {}
 anidb_exception_dict = {}
@@ -166,23 +168,27 @@ def retrieve_exceptions():
     """
     global exception_dict, anidb_exception_dict, xem_exception_dict
 
-    # exceptions are stored on github pages
+    # exceptions are stored in submodules in this repo, sourced from the github repos
+    # TODO: `git submodule update`
     for indexer in sickbeard.indexerApi().indexers:
         if shouldRefresh(sickbeard.indexerApi(indexer).name):
             logger.log(u"Checking for scene exception updates for " + sickbeard.indexerApi(indexer).name + "")
 
-            url = sickbeard.indexerApi(indexer).config['scene_url']
+            loc = sickbeard.indexerApi(indexer).config['scene_loc']
+            try:
+                data = helpers.getURL(loc, session=sickbeard.indexerApi(indexer).session)
+            except Exception:
+                continue
 
-            url_data = helpers.getURL(url)
-            if url_data is None:
-                # When urlData is None, trouble connecting to github
-                logger.log(u"Check scene exceptions update failed. Unable to get URL: " + url, logger.WARNING)
+            if data is None:
+                # When data is None, trouble connecting to github, or reading file failed
+                logger.log(u"Check scene exceptions update failed. Unable to update from: " + loc, logger.WARNING)
                 continue
 
             setLastRefresh(sickbeard.indexerApi(indexer).name)
 
             # each exception is on one line with the format indexer_id: 'show name 1', 'show name 2', etc
-            for cur_line in url_data.splitlines():
+            for cur_line in data.splitlines():
                 indexer_id, sep, aliases = cur_line.partition(':')  # @UnusedVariable
 
                 if not aliases:
@@ -197,7 +203,7 @@ def retrieve_exceptions():
                 del alias_list
 
             # cleanup
-            del url_data
+            del data
 
     # XEM scene exceptions
     _xem_exceptions_fetcher()
@@ -215,30 +221,22 @@ def retrieve_exceptions():
         else:
             exception_dict[anidb_ex] = anidb_exception_dict[anidb_ex]
 
-    changed_exceptions = False
-
-    # write all the exceptions we got off the net into the database
+    queries = []
     myDB = db.DBConnection('cache.db')
     for cur_indexer_id in exception_dict:
-
-        # get a list of the existing exceptions for this ID
-        existing_exceptions = [x["show_name"] for x in
-                               myDB.select("SELECT * FROM scene_exceptions WHERE indexer_id = ?", [cur_indexer_id])]
-
+        sql_ex = myDB.select("SELECT * FROM scene_exceptions WHERE indexer_id = ?;", [cur_indexer_id])
+        existing_exceptions = [x["show_name"] for x in sql_ex]
         if not cur_indexer_id in exception_dict:
             continue
 
         for cur_exception_dict in exception_dict[cur_indexer_id]:
-            cur_exception, curSeason = cur_exception_dict.items()[0]
-
-            # if this exception isn't already in the DB then add it
-            if cur_exception not in existing_exceptions:
-                myDB.action("INSERT INTO scene_exceptions (indexer_id, show_name, season) VALUES (?,?,?)",
-                            [cur_indexer_id, cur_exception, curSeason])
-                changed_exceptions = True
-
-    # since this could invalidate the results of the cache we clear it out after updating
-    if changed_exceptions:
+            for ex in cur_exception_dict.iteritems():
+                cur_exception, curSeason = ex
+                if cur_exception not in existing_exceptions:
+                    queries.append(["INSERT OR IGNORE INTO scene_exceptions (indexer_id, show_name, season) VALUES (?,?,?);",
+                            [cur_indexer_id, cur_exception, curSeason]])
+    if queries:
+        myDB.mass_action(queries)
         logger.log(u"Updated scene exceptions", logger.DEBUG)
     else:
         logger.log(u"No scene exceptions update needed", logger.DEBUG)
@@ -286,8 +284,11 @@ def _anidb_exceptions_fetcher():
     return anidb_exception_dict
 
 
+xem_session = requests.Session()
+
 def _xem_exceptions_fetcher():
     global xem_exception_dict
+    global xem_session
 
     if shouldRefresh('xem'):
         for indexer in sickbeard.indexerApi().indexers:
@@ -296,7 +297,7 @@ def _xem_exceptions_fetcher():
             url = "http://thexem.de/map/allNames?origin=%s&seasonNumbers=1" % sickbeard.indexerApi(indexer).config[
                 'xem_origin']
 
-            parsedJSON = helpers.getURL(url, json=True)
+            parsedJSON = helpers.getURL(url, session=xem_session, json=True)
             if not parsedJSON:
                 logger.log(u"Check scene exceptions update failed for " + sickbeard.indexerApi(
                     indexer).name + ", Unable to get URL: " + url, logger.ERROR)
@@ -305,7 +306,7 @@ def _xem_exceptions_fetcher():
             if parsedJSON['result'] == 'failure':
                 continue
 
-            for indexerid, names in parsedJSON['data'].items():
+            for indexerid, names in parsedJSON['data'].iteritems():
                 try:
                     xem_exception_dict[int(indexerid)] = names
                 except Exception as e:

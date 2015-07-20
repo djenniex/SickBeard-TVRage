@@ -28,6 +28,7 @@ import traceback
 
 import sickbeard
 
+from versionChecker import CheckVersion
 from sickbeard import db, logger, exceptions, history, ui, helpers
 from sickbeard import encodingKludge as ek
 from sickbeard import search_queue
@@ -43,9 +44,10 @@ import codecs
 try:
     import json
 except ImportError:
-    from lib import simplejson as json
+    import simplejson as json
 
-from lib import subliminal
+import subliminal
+import babelfish
 
 from tornado.web import RequestHandler
 
@@ -72,7 +74,7 @@ result_type_map = {RESULT_SUCCESS: "success",
 
 class ApiHandler(RequestHandler):
     """ api class that returns json results """
-    version = 5  # use an int since float-point is unpredictible
+    version = 5  # use an int since float-point is unpredictable
     intent = 4
 
     def __init__(self, *args, **kwargs):
@@ -83,7 +85,7 @@ class ApiHandler(RequestHandler):
 
     def get(self, *args, **kwargs):
         kwargs = self.request.arguments
-        for arg, value in kwargs.items():
+        for arg, value in kwargs.iteritems():
             if len(value) == 1:
                 kwargs[arg] = value[0]
 
@@ -102,7 +104,7 @@ class ApiHandler(RequestHandler):
         _call_dispatcher = self.call_dispatcher
         # if profile was set wrap "_call_dispatcher" in the profile function
         if 'profile' in kwargs:
-            from lib.profilehooks import profile
+            from profilehooks import profile
 
             _call_dispatcher = profile(_call_dispatcher, immediate=True)
             del kwargs["profile"]
@@ -173,7 +175,7 @@ class ApiHandler(RequestHandler):
                     cmd, cmdIndex = cmd.split("_")  # this gives us the clear cmd and the index
 
                 logger.log(u"API :: " + cmd + ": curKwargs " + str(curKwargs), logger.DEBUG)
-                if not (multiCmds and cmd in ('show.getposter', 'show.getbanner')):  # skip these cmd while chaining
+                if not (multiCmds and cmd in ('show.getposter', 'show.getbanner', 'show.getnetworklogo')):  # skip these cmd while chaining
                     try:
                         if cmd in _functionMaper:
                             # map function
@@ -252,6 +254,8 @@ class ApiHandler(RequestHandler):
         # Redirect initial poster/banner thumb to default images
         if which[0:6] == 'poster':
             default_image_name = 'poster.png'
+        elif which[0:6] == 'fanart':
+            default_image_name = 'fanart.png'
         else:
             default_image_name = 'banner.png'
 
@@ -269,11 +273,27 @@ class ApiHandler(RequestHandler):
                 image_file_name = cache_obj.banner_path(show)
             if which == 'banner_thumb':
                 image_file_name = cache_obj.banner_thumb_path(show)
+            if which == 'fanart':
+                if not cache_obj.has_fanart(show):
+                    cache_obj.fill_cache(sickbeard.helpers.findCertainShow(sickbeard.showList, int(show)))
+                image_file_name = cache_obj.fanart_path(show)
 
             if ek.ek(os.path.isfile, image_file_name):
                 static_image_path = os.path.normpath(image_file_name.replace(sickbeard.CACHE_DIR, '/cache'))
 
         static_image_path = sickbeard.WEB_ROOT + static_image_path.replace('\\', '/')
+        return self.redirect(static_image_path)
+
+    def showNetworkLogo(self, show=None):
+        show = sickbeard.helpers.findCertainShow(sickbeard.showList, int(show))
+
+        if show:
+            image_file_name = show.network_logo_name
+        else:
+            image_file_name = 'nonetwork'
+
+        static_image_path = '%s/images/network/%s.png' % (sickbeard.WEB_ROOT, image_file_name)
+
         return self.redirect(static_image_path)
 
 class ApiCall(ApiHandler):
@@ -752,7 +772,7 @@ class CMD_ComingEpisodes(ApiCall):
         # Safety Measure to convert rows in sql_results to dict.
         # This should not be required as the DB connections should only be returning dict results not sqlite3.row_type
         dict_results = [dict(row) for row in sql_results]
-        
+
         for ep in dict_results:
             """
                 Missed:   yesterday... (less than 1week)
@@ -1023,7 +1043,7 @@ class CMD_EpisodeSetStatus(ApiCall):
 
         extra_msg = ""
         if start_backlog:
-            for season, segment in segments.items():
+            for season, segment in segments.iteritems():
                 cur_backlog_queue_item = search_queue.BacklogQueueItem(showObj, segment)
                 sickbeard.searchQueueScheduler.action.add_item(cur_backlog_queue_item)  # @UndefinedVariable
 
@@ -1082,8 +1102,8 @@ class CMD_SubtitleSearch(ApiCall):
         # return the correct json value
         if previous_subtitles != epObj.subtitles:
             status = 'New subtitles downloaded: %s' % ' '.join([
-                "<img src='" + sickbeard.WEB_ROOT + "/images/flags/" + subliminal.language.Language(
-                    x).alpha2 + ".png' alt='" + subliminal.language.Language(x).name + "'/>" for x in
+                "<img src='" + sickbeard.WEB_ROOT + "/images/flags/" + babelfish.language.Language(
+                    x).alpha2 + ".png' alt='" + babelfish.language.Language(x).name + "'/>" for x in
                 sorted(list(set(epObj.subtitles).difference(previous_subtitles)))])
             response = _responds(RESULT_SUCCESS, msg='New subtitles found')
         else:
@@ -1336,7 +1356,6 @@ class CMD_Logs(ApiCall):
 
         for x in reversed(data):
 
-            x = x.decode('utf-8')
             match = re.match(regex, x)
 
             if match:
@@ -1482,6 +1501,35 @@ class CMD_SickBeardAddRootDir(ApiCall):
         sickbeard.ROOT_DIRS = root_dirs_new
         return _responds(RESULT_SUCCESS, _getRootDirs(), msg="Root directories updated")
 
+class CMD_SickBeardCheckVersion(ApiCall):
+    _help = {"desc": "check if a new version of SickRage is available"}
+
+    def __init__(self, args, kwargs):
+        # required
+        # optional
+        # super, missing, help
+        ApiCall.__init__(self, args, kwargs)
+
+    def run(self):
+        checkversion = CheckVersion()
+        needs_update = checkversion.check_for_new_version()
+
+        data = {
+            "current_version": {
+                "branch": checkversion.get_branch(),
+                "commit": checkversion.updater.get_cur_commit_hash(),
+                "version": checkversion.updater.get_cur_version(),
+            },
+            "latest_version": {
+                "branch": checkversion.get_branch(),
+                "commit": checkversion.updater.get_newest_commit_hash(),
+                "version": checkversion.updater.get_newest_version(),
+            },
+            "commits_offset": checkversion.updater.get_num_commits_behind(),
+            "needs_update": needs_update,
+        }
+
+        return _responds(RESULT_SUCCESS, data)
 
 class CMD_SickBeardCheckScheduler(ApiCall):
     _help = {"desc": "query the scheduler"}
@@ -1759,8 +1807,8 @@ class CMD_SickBeardSearchTVDB(CMD_SickBeardSearchIndexers):
 
 
     def __init__(self, args, kwargs):
-        self.indexerid, args = self.check_params(args, kwargs, "tvdbid", None, False, "int", [])
         CMD_SickBeardSearchIndexers.__init__(self, args, kwargs)
+        self.indexerid, args = self.check_params(args, kwargs, "tvdbid", None, False, "int", [])
 
 
 class CMD_SickBeardSearchTVRAGE(CMD_SickBeardSearchIndexers):
@@ -1772,8 +1820,8 @@ class CMD_SickBeardSearchTVRAGE(CMD_SickBeardSearchIndexers):
     }
 
     def __init__(self, args, kwargs):
-        self.indexerid, args = self.check_params(args, kwargs, "tvrageid", None, False, "int", [])
         CMD_SickBeardSearchIndexers.__init__(self, args, kwargs)
+        self.indexerid, args = self.check_params(args, kwargs, "tvrageid", None, False, "int", [])
 
 
 class CMD_SickBeardSetDefaults(ApiCall):
@@ -1868,6 +1916,27 @@ class CMD_SickBeardShutdown(ApiCall):
         sickbeard.events.put(sickbeard.events.SystemEvent.SHUTDOWN)
         return _responds(RESULT_SUCCESS, msg="SickRage is shutting down...")
 
+class CMD_SickBeardUpdate(ApiCall):
+    _help = {"desc": "update SickRage to the latest version available"}
+
+    def __init__(self, args, kwargs):
+        # required
+        # optional
+        # super, missing, help
+        ApiCall.__init__(self, args, kwargs)
+
+    def run(self):
+        checkversion = CheckVersion()
+
+        if checkversion.check_for_new_version():
+            if checkversion.run_backup_if_safe():
+                checkversion.update()
+
+                return _responds(RESULT_SUCCESS, msg="SickRage is updating ...")
+
+            return _responds(RESULT_FAILURE, msg="SickRage could not backup config ...")
+
+        return _responds(RESULT_FAILURE, msg="SickRage is already up to date")
 
 class CMD_Show(ApiCall):
     _help = {"desc": "display information for a given show",
@@ -2070,7 +2139,8 @@ class CMD_ShowAddNew(ApiCall):
                  "lang": {"desc": "the 2 letter lang abbreviation id"},
                  "subtitles": {"desc": "allow search episode subtitle"},
                  "anime": {"desc": "set show to anime"},
-                 "scene": {"desc": "show searches episodes by scene numbering"}
+                 "scene": {"desc": "show searches episodes by scene numbering"},
+                 "future_status": {"desc": "status of future episodes"}
              }
     }
 
@@ -2091,7 +2161,7 @@ class CMD_ShowAddNew(ApiCall):
         self.flatten_folders, args = self.check_params(args, kwargs, "flatten_folders",
                                                        str(sickbeard.FLATTEN_FOLDERS_DEFAULT), False,
                                                        "bool", [])
-        self.status, args = self.check_params(args, kwargs, "status", None, False, "string",
+        self.status, args = self.check_params(args, kwargs, "status", sickbeard.STATUS_DEFAULT, False, "string",
                                               ["wanted", "skipped", "archived", "ignored"])
         self.lang, args = self.check_params(args, kwargs, "lang", sickbeard.INDEXER_DEFAULT_LANGUAGE, False, "string",
                                             self.valid_languages.keys())
@@ -2104,6 +2174,8 @@ class CMD_ShowAddNew(ApiCall):
         self.scene, args = self.check_params(args, kwargs, "scene", int(sickbeard.SCENE_DEFAULT), False,
                                              "int",
             [])
+        self.future_status, args = self.check_params(args, kwargs, "future_status", sickbeard.STATUS_DEFAULT_AFTER, False, "string",
+                                              ["wanted", "skipped", "archived", "ignored"])
 
         # super, missing, help
         ApiCall.__init__(self, args, kwargs)
@@ -2164,9 +2236,25 @@ class CMD_ShowAddNew(ApiCall):
             if not self.status in statusStrings.statusStrings:
                 raise ApiError("Invalid Status")
             # only allow the status options we want
-            if int(self.status) not in (3, 5, 6, 7):
+            if int(self.status) not in (WANTED, SKIPPED, ARCHIVED, IGNORED):
                 return _responds(RESULT_FAILURE, msg="Status prohibited")
             newStatus = self.status
+
+        # use default status as a failsafe
+        default_ep_status_after = sickbeard.STATUS_DEFAULT_AFTER
+        if self.future_status:
+            # convert the string status to a int
+            for status in statusStrings.statusStrings:
+                if statusStrings[status].lower() == str(self.future_status).lower():
+                    self.future_status = status
+                    break
+            # TODO: check if obsolete
+            if not self.future_status in statusStrings.statusStrings:
+                raise ApiError("Invalid Status")
+            # only allow the status options we want
+            if int(self.future_status) not in (WANTED, SKIPPED, ARCHIVED, IGNORED):
+                return _responds(RESULT_FAILURE, msg="Status prohibited")
+            default_ep_status_after = self.future_status
 
         indexerName = None
         indexerResult = CMD_SickBeardSearchIndexers([], {indexer_ids[self.indexer]: self.indexerid}).run()
@@ -2201,7 +2289,7 @@ class CMD_ShowAddNew(ApiCall):
         sickbeard.showQueueScheduler.action.addShow(int(indexer), int(self.indexerid), showPath, newStatus,
                                                     newQuality,
                                                     int(self.flatten_folders), self.lang, self.subtitles, self.anime,
-                                                    self.scene)  # @UndefinedVariable
+                                                    self.scene, default_status_after=default_ep_status_after)  # @UndefinedVariable
 
         return _responds(RESULT_SUCCESS, {"name": indexerName}, indexerName + " has been queued to be added")
 
@@ -2359,6 +2447,39 @@ class CMD_ShowGetBanner(ApiCall):
         """ get the banner for a show in sickrage """
         return {'outputType': 'image', 'image': self.rh.showPoster(self.indexerid, 'banner')}
 
+class CMD_ShowGetNetworkLogo(ApiCall):
+    _help = {
+        "desc": "Get the network logo stored for a show in SickRage",
+        "requiredParameters": {
+            "indexerid": {
+                "desc": "Unique id of a show",
+            },
+        },
+        "optionalParameters": {
+            "tvdbid": {
+                "desc": "TheTVDB.com unique id of a show",
+            },
+            "tvrageid": {
+                "desc": "TVRage.con unique id of a show",
+            },
+        },
+    }
+
+    def __init__(self, args, kwargs):
+        # required
+        self.indexerid, args = self.check_params(args, kwargs, "indexerid", None, True, "int", [])
+        # optional
+        # super, missing, help
+        ApiCall.__init__(self, args, kwargs)
+
+    def run(self):
+        """
+        :return: The network logo for a show in SickRage
+        """
+        return {
+            'outputType': 'image',
+            'image': self.rh.showNetworkLogo(self.indexerid)
+        }
 
 class CMD_ShowPause(ApiCall):
     _help = {"desc": "set a show's paused state in sickrage",
@@ -2867,6 +2988,7 @@ _functionMaper = {"help": CMD_Help,
                   "sb": CMD_SickBeard,
                   "postprocess": CMD_PostProcess,
                   "sb.addrootdir": CMD_SickBeardAddRootDir,
+                  "sb.checkversion": CMD_SickBeardCheckVersion,
                   "sb.checkscheduler": CMD_SickBeardCheckScheduler,
                   "sb.deleterootdir": CMD_SickBeardDeleteRootDir,
                   "sb.getdefaults": CMD_SickBeardGetDefaults,
@@ -2879,6 +3001,7 @@ _functionMaper = {"help": CMD_Help,
                   "sb.searchtvdb": CMD_SickBeardSearchTVDB,
                   "sb.searchtvrage": CMD_SickBeardSearchTVRAGE,
                   "sb.setdefaults": CMD_SickBeardSetDefaults,
+                  "sb.update": CMD_SickBeardUpdate,
                   "sb.shutdown": CMD_SickBeardShutdown,
                   "show": CMD_Show,
                   "show.addexisting": CMD_ShowAddExisting,
@@ -2888,6 +3011,7 @@ _functionMaper = {"help": CMD_Help,
                   "show.getquality": CMD_ShowGetQuality,
                   "show.getposter": CMD_ShowGetPoster,
                   "show.getbanner": CMD_ShowGetBanner,
+                  "show.getnetworklogo": CMD_ShowGetNetworkLogo,
                   "show.pause": CMD_ShowPause,
                   "show.refresh": CMD_ShowRefresh,
                   "show.seasonlist": CMD_ShowSeasonList,

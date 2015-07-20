@@ -30,10 +30,10 @@ from sickbeard import helpers
 from sickbeard import show_name_helpers
 from sickbeard.exceptions import ex, AuthException
 from sickbeard import clients
-from lib import requests
-from lib.requests.exceptions import RequestException
+import requests
+from requests.exceptions import RequestException
 from sickbeard.bs4_parser import BS4Parser
-from lib.unidecode import unidecode
+from unidecode import unidecode
 from sickbeard.helpers import sanitizeSceneName
 from sickbeard.name_parser.parser import NameParser, InvalidNameException, InvalidShowException
 
@@ -116,6 +116,8 @@ class TNTVillageProvider(generic.TorrentProvider):
             'download' : 'http://forum.tntvillage.scambioetico.org/index.php?act=Attach&type=post&id=%s',
         }
 
+        self.sub_string = ['sub', 'softsub']
+
         self.url = self.urls['base_url']
 
         self.cache = TNTVillageCache(self)
@@ -146,12 +148,12 @@ class TNTVillageProvider(generic.TorrentProvider):
 
         login_params = {'UserName': self.username,
                         'PassWord': self.password,
-                        'CookieDate': 1,
+                        'CookieDate': 0,
                         'submit': 'Connettiti al Forum',
         }
 
         try:
-            response = self.session.post(self.urls['login'], data=login_params, timeout=30, verify=False)
+            response = self.session.post(self.urls['login'], data=login_params, timeout=30)
         except RequestException as e:
             logger.log(u'Unable to connect to ' + self.name + ' provider: ' + ex(e), logger.ERROR)
             return False
@@ -289,25 +291,34 @@ class TNTVillageProvider(generic.TorrentProvider):
         else:
             return Quality.UNKNOWN
 
-    def _is_italian(self,torrent_rows):
+    def _is_italian(self, torrent_rows):
 
-        is_italian = 0
+        name = str(torrent_rows.find_all('td')[1].find('b').find('span'))
+        if not name or name is 'None':
+            return False
 
-        span_tag = (torrent_rows.find_all('td'))[1].find('b').find('span')
+        subFound = italian = False
+        for sub in self.sub_string:
+            if re.search(sub, name, re.I):
+                subFound = True
+            else:
+                continue
 
-        name = str(span_tag)
-        name = name.split('sub')[0] 
+            if re.search("ita", name.split(sub)[0], re.I):
+                logger.log(u"Found Italian release", logger.DEBUG)
+                italian = True
+                break
 
-        if re.search("ita", name, re.I):
+        if not subFound and re.search("ita", name, re.I):
             logger.log(u"Found Italian release", logger.DEBUG)
-            is_italian=1
-
-        return is_italian
+            italian = True
+        
+        return italian
 
     def _is_season_pack(self, name):
 
         try:
-            myParser = NameParser(tryIndexers=True, trySceneExceptions=True, convert=True)
+            myParser = NameParser(tryIndexers=True, trySceneExceptions=True)
             parse_result = myParser.parse(name)
         except InvalidNameException:
             logger.log(u"Unable to parse the filename " + str(name) + " into a valid episode", logger.DEBUG)

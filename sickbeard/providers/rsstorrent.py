@@ -28,8 +28,8 @@ from sickbeard import logger
 from sickbeard import tvcache
 from sickbeard.exceptions import ex
 
-from lib import requests
-from lib.bencode import bdecode
+import requests
+from bencode import bdecode
 
 
 class TorrentRssProvider(generic.TorrentProvider):

@@ -24,9 +24,10 @@ import os
 import re
 import itertools
 import urllib
+import random
 
 import sickbeard
-from lib import requests
+import requests
 
 from sickbeard import helpers, classes, logger, db
 from sickbeard.common import MULTI_EP_RESULT, SEASON_RESULT, USER_AGENT
@@ -61,14 +62,24 @@ class GenericProvider:
 
         self.search_mode = None
         self.search_fallback = False
+
+        self.enabled = False
         self.enable_daily = False
         self.enable_backlog = False
 
         self.cache = tvcache.TVCache(self)
 
-        self.session = requests.session()
+        self.session = requests.Session()
 
-        self.headers = {'Content-Type': 'application/x-www-form-urlencoded', 'User-Agent': USER_AGENT}
+        self.headers = {'User-Agent': USER_AGENT}
+
+        self.btCacheURLS = [
+                'http://torcache.net/torrent/{torrent_hash}.torrent',
+                'http://torrage.com/torrent/{torrent_hash}.torrent',
+                #'http://itorrents.org/torrent/{torrent_hash}.torrent',
+            ]
+
+        random.shuffle(self.btCacheURLS)
 
     def getID(self):
         return GenericProvider.makeID(self.name)
@@ -128,11 +139,80 @@ class GenericProvider:
 
         if self.proxy.isEnabled():
             self.headers.update({'Referer': self.proxy.getProxyURL()})
-            # GlypeProxy SSL warning message
             self.proxyGlypeProxySSLwarning = self.proxy.getProxyURL() + 'includes/process.php?action=sslagree&submit=Continue anyway...'
+        else:
+            if 'Referer' in self.headers:
+                self.headers.pop('Referer')
+            self.proxyGlypeProxySSLwarning = None
 
         return helpers.getURL(self.proxy._buildURL(url), post_data=post_data, params=params, headers=self.headers, timeout=timeout,
                               session=self.session, json=json, proxyGlypeProxySSLwarning=self.proxyGlypeProxySSLwarning)
+
+
+    def _makeURL(self, result):
+        urls = []
+        filename = u''
+        if result.url.startswith('magnet'):
+            try:
+                torrent_hash = re.findall('urn:btih:([\w]{32,40})', result.url)[0].upper()
+
+                try:
+                    torrent_name = re.findall('dn=([^&]+)', result.url)[0]
+                except:
+                    torrent_name = 'NO_DOWNLOAD_NAME'
+
+                if len(torrent_hash) == 32:
+                    torrent_hash = b16encode(b32decode(torrent_hash)).upper()
+
+                if not torrent_hash:
+                    logger.log("Unable to extract torrent hash from magnet: " + ex(result.url), logger.ERROR)
+                    return (urls, filename)
+
+                urls = [x.format(torrent_hash=torrent_hash, torrent_name=torrent_name) for x in self.btCacheURLS]
+            except:
+                logger.log("Unable to extract torrent hash or name from magnet: " + ex(result.url), logger.ERROR)
+                return (urls, filename)
+        else:
+            urls = [result.url]
+
+        if self.providerType == GenericProvider.TORRENT:
+            filename = ek.ek(os.path.join, sickbeard.TORRENT_DIR,
+                             helpers.sanitizeFileName(result.name) + '.' + self.providerType)
+
+        elif self.providerType == GenericProvider.NZB:
+            filename = ek.ek(os.path.join, sickbeard.NZB_DIR,
+                             helpers.sanitizeFileName(result.name) + '.' + self.providerType)
+
+        return (urls, filename)
+
+
+    def headURL(self, result):
+        """
+        Check if URL is valid and the file exists at URL
+        """
+
+        # check for auth
+        if not self._doLogin():
+            return False
+
+        urls, filename = self._makeURL(result)
+
+        if self.proxy.isEnabled():
+            self.headers.update({'Referer': self.proxy.getProxyURL()})
+            self.proxyGlypeProxySSLwarning = self.proxy.getProxyURL() + 'includes/process.php?action=sslagree&submit=Continue anyway...'
+        else:
+            if 'Referer' in self.headers:
+                self.headers.pop('Referer')
+            self.proxyGlypeProxySSLwarning = None
+
+        for url in urls:
+            if 'NO_DOWNLOAD_NAME' in url:
+                continue
+            if helpers.headURL(self.proxy._buildURL(url), session=self.session, headers=self.headers,
+                               proxyGlypeProxySSLwarning=self.proxyGlypeProxySSLwarning):
+                return url
+
+        return u''
 
     def downloadResult(self, result):
         """
@@ -143,44 +223,21 @@ class GenericProvider:
         if not self._doLogin():
             return False
 
-        if self.providerType == GenericProvider.TORRENT:
-            try:
-                torrent_hash = re.findall('urn:btih:([\w]{32,40})', result.url)[0].upper()
-                torrent_name = re.findall('dn=([^&]+)', result.url)[0]
+        urls, filename = self._makeURL(result)
 
-                if len(torrent_hash) == 32:
-                    torrent_hash = b16encode(b32decode(torrent_hash)).upper()
-
-                if not torrent_hash:
-                    logger.log("Unable to extract torrent hash from link: " + ex(result.url), logger.ERROR)
-                    return False
-
-                urls = [
-                    'http://torcache.net/torrent/' + torrent_hash + '.torrent',
-                    'http://zoink.ch/torrent/' + torrent_name + '.torrent',
-                    'http://torrage.com/torrent/' + torrent_hash + '.torrent',
-                ]
-            except:
-                urls = [result.url]
-
-            filename = ek.ek(os.path.join, sickbeard.TORRENT_DIR,
-                             helpers.sanitizeFileName(result.name) + '.' + self.providerType)
-        elif self.providerType == GenericProvider.NZB:
-            urls = [result.url]
-
-            filename = ek.ek(os.path.join, sickbeard.NZB_DIR,
-                             helpers.sanitizeFileName(result.name) + '.' + self.providerType)
-        else:
-            return
+        if self.proxy.isEnabled():
+            self.headers.update({'Referer': self.proxy.getProxyURL()})
+        elif 'Referer' in self.headers:
+            self.headers.pop('Referer')
 
         for url in urls:
+            if 'NO_DOWNLOAD_NAME' in url:
+                continue
+
             logger.log(u"Downloading a result from " + self.name + " at " + url)
-            if helpers.download_file(url, filename, session=self.session):
+            if helpers.download_file(self.proxy._buildURL(url), filename, session=self.session, headers=self.headers):
                 if self._verify_download(filename):
-                    if self.providerType == GenericProvider.TORRENT:
-                        logger.log(u"Saved magnet link to " + filename, logger.INFO)
-                    else:
-                        logger.log(u"Saved result to " + filename, logger.INFO)
+                    logger.log(u"Saved result to " + filename, logger.INFO)
                     return True
                 else:
                     logger.log(u"Could not download %s" % url, logger.WARNING)
@@ -329,7 +386,7 @@ class GenericProvider:
                     else:
                         items[quality].append(item)
 
-            itemList = list(itertools.chain(*[v for (k, v) in sorted(items.items(), reverse=True)]))
+            itemList = list(itertools.chain(*[v for (k, v) in sorted(items.iteritems(), reverse=True)]))
             itemList += itemsUnknown if itemsUnknown else []
 
         # filter results
@@ -339,7 +396,7 @@ class GenericProvider:
 
             # parse the file name
             try:
-                myParser = NameParser(False, convert=True)
+                myParser = NameParser(False)
                 parse_result = myParser.parse(title)
             except InvalidNameException:
                 logger.log(u"Unable to parse the filename " + title + " into a valid episode", logger.DEBUG)
