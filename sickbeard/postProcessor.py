@@ -912,7 +912,7 @@ class PostProcessor(object):
         
         # try to find out if we have enough space to perform the copy or move action.
         if not helpers.isFileLocked(self.file_path, False):
-            if not verify_freespace(self.file_path, ek.ek(os.path.dirname, ep_obj.show._location), [ep_obj] + ep_obj.relatedEps):
+            if not verify_freespace(self.file_path, ep_obj.show._location, [ep_obj] + ep_obj.relatedEps):
                 self._log("Not enough space to continue PP, exiting")
                 return False
         else:
@@ -1090,6 +1090,9 @@ class PostProcessor(object):
 
         # do the library update for Plex
         notifiers.plex_notifier.update_library(ep_obj)
+
+        # do the library update for EMBY
+        notifiers.emby_notifier.update_library(ep_obj.show)
 
         # do the library update for NMJ
         # nmj_notifier kicks off its library update when the notify_download is issued (inside notifiers)

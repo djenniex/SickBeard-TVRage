@@ -42,6 +42,7 @@ class MainSanityCheck(db.DBSanityCheck):
         self.fix_episode_statuses()
         self.fix_invalid_airdates()
         self.fix_subtitles_codes()
+        self.fix_show_nfo_lang()
 
     def fix_duplicate_shows(self, column='indexer_id'):
 
@@ -127,7 +128,7 @@ class MainSanityCheck(db.DBSanityCheck):
         curDate = datetime.date.today()
 
         sqlResults = self.connection.select(
-            "SELECT episode_id FROM tv_episodes WHERE (airdate > ? or airdate = 1) AND status in (?,?)",
+            "SELECT episode_id FROM tv_episodes WHERE (airdate > ? or airdate = 1) AND status in (?,?) AND season > 0",
             [curDate.toordinal(), common.SKIPPED, common.WANTED])
 
         for cur_unaired in sqlResults:
@@ -203,6 +204,8 @@ class MainSanityCheck(db.DBSanityCheck):
             self.connection.action("UPDATE tv_episodes SET subtitles = ?, subtitles_lastsearch = ? WHERE episode_id = ?;",
                 [','.join(langs), datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"), sqlResult['episode_id']])
 
+    def fix_show_nfo_lang(self):
+        self.connection.action("UPDATE tv_shows SET lang = '' WHERE lang = 0 or lang = '0'")
 
 def backupDatabase(version):
     logger.log(u"Backing up database before upgrade")

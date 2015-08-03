@@ -96,13 +96,13 @@ class html_entities(CheetahFilter):
                 filtered = unicode(val)
             except Exception:
                 try:
-                    filtered = unicode(val, sickbeard.SYS_ENCODING)
+                    filtered = unicode(val, 'utf-8')
                 except Exception:
                     try:
-                        filtered = unicode(val, 'utf-8')
+                        filtered = unicode(val, 'latin-1')
                     except Exception:
                         try:
-                            filtered = unicode(val, 'latin-1')
+                            filtered = unicode(val, sickbeard.SYS_ENCODING)
                         except Exception:
                             logger.log(u'Unable to decode using %s, utf-8, or latin-1. Falling back to chardet!' %
                                     sickbeard.SYS_ENCODING, logger.ERROR)
@@ -129,6 +129,7 @@ class PageTemplate(CheetahTemplate):
         self.sbHttpsEnabled = sickbeard.ENABLE_HTTPS
         self.sbHandleReverseProxy = sickbeard.HANDLE_REVERSE_PROXY
         self.sbThemeName = sickbeard.THEME_NAME
+        self.sbDefaultPage = sickbeard.DEFAULT_PAGE
         self.sbLogin = rh.get_current_user()
 
         if rh.request.headers['Host'][0] == '[':
@@ -281,8 +282,9 @@ class WebHandler(BaseHandler):
 
 class LoginHandler(BaseHandler):
     def get(self, *args, **kwargs):
+
         if self.get_current_user():
-            self.redirect('/home/')
+            self.redirect('/' + sickbeard.DEFAULT_PAGE +'/')
         else:
             t = PageTemplate(rh=self, file="login.tmpl")
             self.finish(t.respond())
@@ -301,11 +303,11 @@ class LoginHandler(BaseHandler):
         if api_key:
             remember_me = int(self.get_argument('remember_me', default=0) or 0)
             self.set_secure_cookie('sickrage_user', api_key, expires_days=30 if remember_me > 0 else None)
-            logger.log('User logged into the SickRage web interface from IP: ' + self.request.remote_ip, logger.INFO)
+            logger.log('User logged into the SickRage web interface', logger.INFO)
         else:
             logger.log('User attempted a failed login to the SickRage web interface from IP: ' + self.request.remote_ip, logger.WARNING)    
 
-        self.redirect('/home/')
+        self.redirect('/' + sickbeard.DEFAULT_PAGE +'/')
 
 
 class LogoutHandler(BaseHandler):
@@ -340,7 +342,7 @@ class WebRoot(WebHandler):
         super(WebRoot, self).__init__(*args, **kwargs)
 
     def index(self):
-        return self.redirect('/home/')
+        return self.redirect('/' + sickbeard.DEFAULT_PAGE +'/')
 
     def robots_txt(self):
         """ Keep web crawlers out """
@@ -431,7 +433,7 @@ class WebRoot(WebHandler):
             layout = 'poster'
 
         sickbeard.HOME_LAYOUT = layout
-
+        #Dont redirect to default page so user can see new layout
         return self.redirect("/home/")
 
     def setPosterSortBy(self, sort):
@@ -453,6 +455,15 @@ class WebRoot(WebHandler):
             layout = 'detailed'
 
         sickbeard.HISTORY_LAYOUT = layout
+
+        return self.redirect("/history/")
+
+    def setHistoryLimit(self, history_limit):
+
+        if not int(history_limit):
+            history_limit = 100
+
+        sickbeard.HISTORY_LIMIT = history_limit
 
         return self.redirect("/history/")
 
@@ -707,6 +718,7 @@ class Home(WebRoot):
             {'title': 'Manual Post-Processing', 'path': 'home/postprocess/'},
             {'title': 'Update KODI', 'path': 'home/updateKODI/', 'requires': self.haveKODI},
             {'title': 'Update Plex', 'path': 'home/updatePLEX/', 'requires': self.havePLEX},
+            {'title': 'Update Emby', 'path': 'home/updateEMBY/', 'requires': self.haveEMBY},
             {'title': 'Manage Torrents', 'path': 'manage/manageTorrents/', 'requires': self.haveTORRENT},
         ]
 
@@ -781,6 +793,9 @@ class Home(WebRoot):
 
     def havePLEX(self):
         return sickbeard.USE_PLEX and sickbeard.PLEX_UPDATE_LIBRARY
+
+    def haveEMBY(self):
+        return sickbeard.USE_EMBY
 
     def haveTORRENT(self):
         if sickbeard.USE_TORRENTS and sickbeard.TORRENT_METHOD != 'blackhole' \
@@ -972,6 +987,17 @@ class Home(WebRoot):
             return notifiers.libnotify.diagnose()
 
 
+    def testEMBY(self, host=None, emby_apikey=None):
+        # self.set_header('Cache-Control', 'max-age=0,no-cache,no-store')
+
+        host = config.clean_host(host)
+        result = notifiers.emby_notifier.test_notify(urllib.unquote_plus(host), emby_apikey)
+        if result:
+            return "Test notice sent successfully to " + urllib.unquote_plus(host)
+        else:
+            return "Test notice failed to " + urllib.unquote_plus(host)
+
+
     def testNMJ(self, host=None, database=None, mount=None):
         # self.set_header('Cache-Control', 'max-age=0,no-cache,no-store')
 
@@ -1115,7 +1141,7 @@ class Home(WebRoot):
 
     def shutdown(self, pid=None):
         if str(pid) != str(sickbeard.PID):
-            return self.redirect("/home/")
+            return self.redirect('/' + sickbeard.DEFAULT_PAGE +'/')
 
         sickbeard.events.put(sickbeard.events.SystemEvent.SHUTDOWN)
 
@@ -1126,7 +1152,7 @@ class Home(WebRoot):
 
     def restart(self, pid=None):
         if str(pid) != str(sickbeard.PID):
-            return self.redirect("/home/")
+            return self.redirect('/' + sickbeard.DEFAULT_PAGE +'/')
 
         t = PageTemplate(rh=self, file="restart.tmpl")
         t.submenu = self.HomeMenu()
@@ -1142,7 +1168,7 @@ class Home(WebRoot):
 
         sickbeard.versionCheckScheduler.action.check_for_new_version(force=True)
 
-        return self.redirect('/home/')
+        return self.redirect('/' + sickbeard.DEFAULT_PAGE +'/')
 
     def update(self, pid=None):
         
@@ -1164,7 +1190,7 @@ class Home(WebRoot):
                 return self._genericMessage("Update Failed",
                                             "Update wasn't successful, not restarting. Check your log for more information.")
         else:
-            return self.redirect('/home/')
+            return self.redirect('/' + sickbeard.DEFAULT_PAGE +'/')
 
     def branchCheckout(self, branch):
         if sickbeard.BRANCH != branch:
@@ -1173,7 +1199,7 @@ class Home(WebRoot):
             return self.update(sickbeard.PID)
         else:
             ui.notifications.message('Already on branch: ', branch)
-            return self.redirect('/home')
+            return self.redirect('/' + sickbeard.DEFAULT_PAGE +'/')
 
     def getDBcompare(self, branchDest=None):
 
@@ -1259,6 +1285,8 @@ class Home(WebRoot):
                     {'title': 'Force Full Update', 'path': 'home/updateShow?show=%d&amp;force=1' % showObj.indexerid})
                 t.submenu.append({'title': 'Update show in KODI',
                                   'path': 'home/updateKODI?show=%d' % showObj.indexerid, 'requires': self.haveKODI})
+                t.submenu.append({'title': 'Update show in Emby',
+                                  'path': 'home/updateEMBY?show=%d' % showObj.indexerid, 'requires': self.haveEMBY})
                 t.submenu.append({'title': 'Preview Rename', 'path': 'home/testRename?show=%d' % showObj.indexerid})
                 if sickbeard.USE_SUBTITLES and not sickbeard.showQueueScheduler.action.isBeingSubtitled(
                         showObj) and showObj.subtitles:
@@ -1597,7 +1625,8 @@ class Home(WebRoot):
                                  (showObj.name,
                                   ('deleted', 'trashed')[sickbeard.TRASH_REMOVE_SHOW],
                                   ('(media untouched)', '(with all related media)')[bool(full)]))
-        return self.redirect("/home/")
+        #Dont redirect to default page so user can confirm show was deleted
+        return self.redirect('/home/')
 
 
     def refreshShow(self, show=None):
@@ -1695,9 +1724,27 @@ class Home(WebRoot):
             ui.notifications.error("Unable to contact Plex Media Server host: " + sickbeard.PLEX_SERVER_HOST)
         return self.redirect('/home/')
 
+    def updateEMBY(self, show=None):
+        showName=None
+        showObj=None
+
+        if show:
+            showObj = sickbeard.helpers.findCertainShow(sickbeard.showList, int(show))
+
+        if notifiers.emby_notifier.update_library(showObj):
+            ui.notifications.message(
+                "Library update command sent to Emby host: " + sickbeard.EMBY_HOST)
+        else:
+            ui.notifications.error("Unable to contact Emby host: " + sickbeard.EMBY_HOST)
+
+        if showObj:
+            return self.redirect('/home/displayShow?show=' + str(showObj.indexerid))
+        else:
+            return self.redirect('/home/')
+
     def setStatus(self, show=None, eps=None, status=None, direct=False):
 
-        if show is None or eps is None or status is None:
+        if not all([show, eps, status]):
             errMsg = "You must specify a show and at least one episode"
             if direct:
                 ui.notifications.error('Error', errMsg)
@@ -1715,7 +1762,7 @@ class Home(WebRoot):
 
         showObj = sickbeard.helpers.findCertainShow(sickbeard.showList, int(show))
 
-        if showObj is None:
+        if not showObj:
             errMsg = "Error", "Show not in show list"
             if direct:
                 ui.notifications.error('Error', errMsg)
@@ -1725,18 +1772,25 @@ class Home(WebRoot):
 
         segments = {}
         trakt_data = []
-        if eps is not None:
+        if eps:
 
             sql_l = []
             for curEp in eps.split('|'):
+
+                if not curEp:
+                    logger.log(u"curEp was empty when trying to setStatus", logger.DEBUG)
 
                 logger.log(u"Attempting to set status on episode " + curEp + " to " + status, logger.DEBUG)
 
                 epInfo = curEp.split('x')
 
+                if not all(epInfo):
+                    logger.log(u"Something went wrong when trying to setStatus, epInfo[0]: %s, epInfo[1]: %s" % (epInfo[0], epInfo[1]), logger.DEBUG)
+                    continue
+
                 epObj = showObj.getEpisode(int(epInfo[0]), int(epInfo[1]))
 
-                if epObj is None:
+                if not epObj:
                     return self._genericMessage("Error", "Episode couldn't be retrieved")
 
                 if int(status) in [WANTED, FAILED]:
@@ -1752,16 +1806,14 @@ class Home(WebRoot):
                         logger.log(u"Refusing to change status of " + curEp + " because it is UNAIRED", logger.ERROR)
                         continue
 
-                    if int(
-                            status) in Quality.DOWNLOADED and epObj.status not in Quality.SNATCHED + Quality.SNATCHED_PROPER + Quality.DOWNLOADED + [
+                    if int(status) in Quality.DOWNLOADED and epObj.status not in Quality.SNATCHED + Quality.SNATCHED_PROPER + Quality.DOWNLOADED + [
                         IGNORED] and not ek.ek(os.path.isfile, epObj.location):
                         logger.log(
                             u"Refusing to change status of " + curEp + " to DOWNLOADED because it's not SNATCHED/DOWNLOADED",
                             logger.ERROR)
                         continue
 
-                    if int(
-                            status) == FAILED and epObj.status not in Quality.SNATCHED + Quality.SNATCHED_PROPER + Quality.DOWNLOADED:
+                    if int(status) == FAILED and epObj.status not in Quality.SNATCHED + Quality.SNATCHED_PROPER + Quality.DOWNLOADED:
                         logger.log(
                             u"Refusing to change status of " + curEp + " to FAILED because it's not SNATCHED/DOWNLOADED",
                             logger.ERROR)
@@ -2157,6 +2209,20 @@ class Home(WebRoot):
 
         return json.dumps({'result': 'failure'})            
 
+@route('/IRC(/?.*)')
+class HomeIRC(Home):
+    def __init__(self, *args, **kwargs):
+        super(HomeIRC, self).__init__(*args, **kwargs)
+
+    def index(self):
+
+        t = PageTemplate(rh=self, file="IRC.tmpl")
+        t.submenu = self.HomeMenu()
+        t.title = "IRC"
+        t.header = "IRC"
+        t.topmenu = "IRC"
+        return t.respond()
+
 @route('/news(/?.*)')
 class HomeNews(Home):
     def __init__(self, *args, **kwargs):
@@ -2175,7 +2241,7 @@ class HomeNews(Home):
         t.title = "News"
         t.header = "News"
         t.topmenu = "news"
-        t.data = markdown2.markdown(news)
+        t.data = markdown2.markdown(news if news else "The was a problem connecting to github, please refresh and try again")
 
         return t.respond()
 
@@ -2196,7 +2262,7 @@ class HomeChangeLog(Home):
         t.title = "Changelog"
         t.header = "Changelog"
         t.topmenu = "changes"
-        t.data = markdown2.markdown(changes)
+        t.data = markdown2.markdown(changes if changes else "The was a problem connecting to github, please refresh and try again")
 
         return t.respond()
 
@@ -2692,6 +2758,7 @@ class HomeAddShows(Home):
                 logger.log(u"Unable to create the folder " + show_dir + ", can't add the show", logger.ERROR)
                 ui.notifications.error("Unable to add show",
                                        "Unable to create the folder " + show_dir + ", can't add the show")
+                #Dont redirect to default page because user wants to see the new show
                 return self.redirect("/home/")
             else:
                 helpers.chmodAsParent(show_dir)
@@ -3754,7 +3821,7 @@ class ConfigGeneral(Config):
                     proxy_setting=None, proxy_indexers=None, anon_redirect=None, git_path=None, git_remote=None,
                     calendar_unprotected=None, debug=None, ssl_verify=None, no_restart=None, coming_eps_missed_range=None,
                     filter_row=None, fuzzy_dating=None, trim_zero=None, date_preset=None, date_preset_na=None, time_preset=None,
-                    indexer_timeout=None, download_url=None, rootDir=None, theme_name=None,
+                    indexer_timeout=None, download_url=None, rootDir=None, theme_name=None, default_page=None,
                     git_reset=None, git_username=None, git_password=None, git_autoissues=None, display_all_seasons=None):
 
         results = []
@@ -3784,7 +3851,9 @@ class ConfigGeneral(Config):
         sickbeard.PROXY_INDEXERS = config.checkbox_to_value(proxy_indexers)
         sickbeard.GIT_USERNAME = git_username
         sickbeard.GIT_PASSWORD = git_password
-        sickbeard.GIT_RESET = config.checkbox_to_value(git_reset)
+        #sickbeard.GIT_RESET = config.checkbox_to_value(git_reset)
+        #Force GIT_RESET
+        sickbeard.GIT_RESET = 1        
         sickbeard.GIT_AUTOISSUES = config.checkbox_to_value(git_autoissues)
         sickbeard.GIT_PATH = git_path
         sickbeard.GIT_REMOTE = git_remote
@@ -3844,6 +3913,8 @@ class ConfigGeneral(Config):
         sickbeard.HANDLE_REVERSE_PROXY = config.checkbox_to_value(handle_reverse_proxy)
 
         sickbeard.THEME_NAME = theme_name
+        
+        sickbeard.DEFAULT_PAGE = default_page
 
         sickbeard.save_config()
 
@@ -4705,6 +4776,7 @@ class ConfigNotifications(Config):
                           plex_notify_onsubtitledownload=None, plex_update_library=None,
                           plex_server_host=None, plex_server_token=None, plex_host=None, plex_username=None, plex_password=None,
                           use_plex_client=None, plex_client_username=None, plex_client_password=None,
+                          use_emby=None, emby_host=None, emby_apikey=None,
                           use_growl=None, growl_notify_onsnatch=None, growl_notify_ondownload=None,
                           growl_notify_onsubtitledownload=None, growl_host=None, growl_password=None,
                           use_freemobile=None, freemobile_notify_onsnatch=None, freemobile_notify_ondownload=None,
@@ -4772,7 +4844,11 @@ class ConfigNotifications(Config):
         sickbeard.USE_PLEX_CLIENT = config.checkbox_to_value(use_plex)
         sickbeard.PLEX_CLIENT_USERNAME = plex_username
         sickbeard.PLEX_CLIENT_PASSWORD = plex_password
-        
+
+        sickbeard.USE_EMBY = config.checkbox_to_value(use_emby)
+        sickbeard.EMBY_HOST = config.clean_host(emby_host)
+        sickbeard.EMBY_APIKEY = emby_apikey
+
         sickbeard.USE_GROWL = config.checkbox_to_value(use_growl)
         sickbeard.GROWL_NOTIFY_ONSNATCH = config.checkbox_to_value(growl_notify_onsnatch)
         sickbeard.GROWL_NOTIFY_ONDOWNLOAD = config.checkbox_to_value(growl_notify_ondownload)
@@ -4928,7 +5004,7 @@ class ConfigSubtitles(Config):
 
     def saveSubtitles(self, use_subtitles=None, subtitles_plugins=None, subtitles_languages=None, subtitles_dir=None,
                       service_order=None, subtitles_history=None, subtitles_finder_frequency=None,
-                      subtitles_multi=None, embedded_subtitles_all=None):
+                      subtitles_multi=None, embedded_subtitles_all=None, subtitles_extra_scripts=None):
 
         results = []
 
@@ -4940,6 +5016,7 @@ class ConfigSubtitles(Config):
         sickbeard.SUBTITLES_HISTORY = config.checkbox_to_value(subtitles_history)
         sickbeard.EMBEDDED_SUBTITLES_ALL = config.checkbox_to_value(embedded_subtitles_all)
         sickbeard.SUBTITLES_MULTI = config.checkbox_to_value(subtitles_multi)
+        sickbeard.SUBTITLES_EXTRA_SCRIPTS = [x.strip() for x in subtitles_extra_scripts.split('|') if x.strip()]
 
         # Subtitles services
         services_str_list = service_order.split()
@@ -5010,7 +5087,7 @@ class ErrorLogs(WebRoot):
     def ErrorLogsMenu(self):
         menu = [
             {'title': 'Clear Errors', 'path': 'errorlogs/clearerrors/'},
-            {'title': 'Submit Errors', 'path': 'errorlogs/submit_errors/', 'requires': self.haveErrors},
+            {'title': 'Submit Errors', 'path': 'errorlogs/submit_errors/', 'requires': self.haveErrors, 'confirm': True},
         ]
 
         return menu
