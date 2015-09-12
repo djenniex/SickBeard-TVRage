@@ -18,12 +18,10 @@
 # along with SickRage.  If not, see <http://www.gnu.org/licenses/>.
 
 import re
-import traceback
-import urlparse
 import sickbeard
 import generic
 import urllib
-from sickbeard.common import Quality, cpu_presets
+from sickbeard.common import Quality
 from sickbeard import logger
 from sickbeard import tvcache
 from sickbeard import db
@@ -31,13 +29,10 @@ from sickbeard import classes
 from sickbeard import helpers
 from sickbeard import show_name_helpers
 from sickbeard.exceptions import ex, AuthException
-from sickbeard import clients
 import requests
-from requests import exceptions
-from bs4 import BeautifulSoup as soup
+from BeautifulSoup import BeautifulSoup as soup
 from unidecode import unidecode
 from sickbeard.helpers import sanitizeSceneName
-from requests.auth import AuthBase
 from datetime import datetime
 
 class HDTorrentsProvider(generic.TorrentProvider):
@@ -47,8 +42,6 @@ class HDTorrentsProvider(generic.TorrentProvider):
 
         self.supportsBacklog = True
 
-        self.enabled = False
-        self.session = requests.Session()
         self.username = None
         self.password = None
         self.ratio = None
@@ -89,14 +82,12 @@ class HDTorrentsProvider(generic.TorrentProvider):
                         'pwd': self.password,
                         'submit': 'Confirm'}
 
-        try:
-            response = self.session.post(self.urls['login'], data=login_params, timeout=30)
-        except (requests.exceptions.ConnectionError, requests.exceptions.HTTPError), e:
-            logger.log(u'Unable to connect to ' + self.name + ' provider: ' + ex(e), logger.ERROR)
+        response = self.getURL(self.urls['login'],  post_data=login_params, timeout=30)
+        if not response:
+            logger.log(u'Unable to connect to ' + self.name + ' provider.', logger.ERROR)
             return False
 
-        if re.search('You need cookies enabled to log in.', response.text) \
-                or response.status_code == 401:
+        if re.search('You need cookies enabled to log in.', response):
             logger.log(u'Invalid username or password for ' + self.name + ' Check your settings', logger.ERROR)
             return False
 
@@ -136,7 +127,7 @@ class HDTorrentsProvider(generic.TorrentProvider):
                 ep_string = sanitizeSceneName(show_name) + ' ' + \
                             "%i" % int(ep_obj.scene_absolute_number)
             else:
-                ep_string = show_name_helpers.sanitizeSceneName(show_name) + ' ' + \
+                ep_string = sanitizeSceneName(show_name) + ' ' + \
                             sickbeard.config.naming_ep_type[2] % {'seasonnumber': ep_obj.scene_season,
                                                                   'episodenumber': ep_obj.scene_episode}
             if add_string:
@@ -171,10 +162,12 @@ class HDTorrentsProvider(generic.TorrentProvider):
 
             empty = html.find('No torrents here')
             if empty:
+                logger.log(u"Could not find any torrents", logger.ERROR)
                 continue
 
             tables = html.find('table', attrs={'class': 'mainblockcontenttt'})
             if not tables:
+                logger.log(u"Could not find table of torrents mainblockcontenttt", logger.ERROR)
                 continue
 
             torrents = tables.findChildren('tr')
@@ -191,35 +184,39 @@ class HDTorrentsProvider(generic.TorrentProvider):
                     title = url = seeders = leechers = None
                     size = 0
                     for cell in cells:
-                        if None is title and cell.get('title') and cell.get('title') in 'Download':
-                            title = re.search('f=(.*).torrent', cell.a['href']).group(1).replace('+', '.')
-                            url = self.urls['home'] % cell.a['href']
-                        if None is seeders and cell.get('class')[0] and cell.get('class')[0] in 'green' 'yellow' 'red':
-                            seeders = int(cell.text)
-                        elif None is leechers and cell.get('class')[0] and cell.get('class')[0] in 'green' 'yellow' 'red':
-                            leechers = int(cell.text)
+                        try:
+                            if None is title and cell.get('title') and cell.get('title') in 'Download':
+                                title = re.search('f=(.*).torrent', cell.a['href']).group(1).replace('+', '.')
+                                url = self.urls['home'] % cell.a['href']
+                            if None is seeders and cell.get('class')[0] and cell.get('class')[0] in 'green' 'yellow' 'red':
+                                seeders = int(cell.text)
+                            elif None is leechers and cell.get('class')[0] and cell.get('class')[0] in 'green' 'yellow' 'red':
+                                leechers = int(cell.text)
+    
+                            # Skip torrents released before the episode aired (fakes)
+                            if re.match('..:..:..  ..:..:....', cells[6].text):
+                                if (datetime.strptime(cells[6].text, '%H:%M:%S  %m/%d/%Y') -
+                                    datetime.combine(epObj.airdate, datetime.min.time())).days < 0:
+                                    continue
+        
+                            # Need size for failed downloads handling
+                            if re.match('[0-9]+,?\.?[0-9]* [KkMmGg]+[Bb]+', cells[7].text):
+                                size = self._convertSize(cells[7].text)
+        
+                            if not title or not url or not seeders or leechers is None or not size or \
+                                    seeders < self.minseed or leechers < self.minleech:
+                                continue
+            
+                            item = title, url, seeders, leechers, size
+                            logger.log(u"Found result: " + title + " (" + searchURL + ")", logger.DEBUG)
+            
+                            results.append(item)
 
-                    # Skip torrents released before the episode aired (fakes)
-                    if re.match('..:..:..  ..:..:....', cells[6].text):
-                        if (datetime.strptime(cells[6].text, '%H:%M:%S  %m/%d/%Y') -
-                            datetime.combine(ep_obj.airdate, datetime.min.time())).days < 0:
-                            continue
-
-                    # Need size for failed downloads handling
-                    if re.match('[0-9]+,?\.?[0-9]* [KkMmGg]+[Bb]+', cells[7].text):
-                        size = self._convertSize(cells[7].text)
+                        except:
+                            raise
 
                 except (AttributeError, TypeError, KeyError, ValueError):
                     continue
-
-                if not title or not url or not seeders or leechers is None or not size or \
-                        seeders < self.minseed or leechers < self.minleech:
-                    continue
-
-                item = title, url, seeders, leechers, size
-                logger.log(u"Found result: " + title + " (" + searchURL + ")", logger.DEBUG)
-
-                results.append(item)
 
         results.sort(key=lambda tup: tup[3], reverse=True)
         return results
