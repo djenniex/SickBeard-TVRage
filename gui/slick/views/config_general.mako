@@ -12,29 +12,10 @@
     from sickbeard.helpers import anon_url
 %>
 <%block name="scripts">
-<script type="text/javascript" src="${sbRoot}/js/config.js?${sbPID}"></script>
-<script type="text/javascript" src="${sbRoot}/js/rootDirs.js?${sbPID}"></script>
-<script type="text/javascript" src="${sbRoot}/js/lib/bootstrap-formhelpers.min-2.3.0.js?${sbPID}"></script>
-<script type="text/javascript" charset="utf-8">
-    $(document).ready(function(){
-        if ($("input[name='proxy_setting']").val().length == 0) {
-            $("input[id='proxy_indexers']").prop('checked', false);
-            $("label[for='proxy_indexers']").hide();
-        }
-
-        $("input[name='proxy_setting']").on('input', function() {
-            if( $(this).val().length === 0 ) {
-                $("input[id='proxy_indexers']").prop('checked', false);
-                $("label[for='proxy_indexers']").hide();
-            } else {
-                $("label[for='proxy_indexers']").show();
-            }
-        });
-    });
-
-    $('#log_dir').fileBrowser({ title: 'Select log file folder location' });
-    $('#config-components').tabs();
-</script>
+<script type="text/javascript" src="${srRoot}/js/config.js?${sbPID}"></script>
+<script type="text/javascript" src="${srRoot}/js/rootDirs.js?${sbPID}"></script>
+<script type="text/javascript" src="${srRoot}/js/lib/bootstrap-formhelpers.min-2.3.0.js?${sbPID}"></script>
+<script type="text/javascript" src="${srRoot}/js/new/config_general.js"></script>
 </%block>
 <%block name="content">
 % if not header is UNDEFINED:
@@ -94,10 +75,10 @@
                                 <span class="component-title">Initial page</span>
                                 <span class="component-desc">
                                     <select id="default_page" name="default_page" class="form-control input-sm">
-                                        <option value="news" ${('', 'selected="selected"')[sickbeard.DEFAULT_PAGE == 'news']}>News</option>
-                                        <option value="home" ${('', 'selected="selected"')[sickbeard.DEFAULT_PAGE == 'home']}>Home</option>
-                                        <option value="comingEpisodes" ${('', 'selected="selected"')[sickbeard.DEFAULT_PAGE == 'comingEpisodes']}>Coming Episodes</option>
+                                        <option value="home" ${('', 'selected="selected"')[sickbeard.DEFAULT_PAGE == 'home']}>Shows</option>
+                                        <option value="schedule" ${('', 'selected="selected"')[sickbeard.DEFAULT_PAGE == 'schedule']}>Schedule</option>
                                         <option value="history" ${('', 'selected="selected"')[sickbeard.DEFAULT_PAGE == 'history']}>History</option>
+                                        <option value="news" ${('', 'selected="selected"')[sickbeard.DEFAULT_PAGE == 'news']}>News</option>
                                         <option value="IRC" ${('', 'selected="selected"')[sickbeard.DEFAULT_PAGE == 'IRC']}>IRC</option>
                                     </select>
                                     <span>when launching SickRage interface</span>
@@ -310,7 +291,7 @@
                                 <span class="component-title">Missed episodes range</span>
                                 <span class="component-desc">
                                     <input type="number" step="1" min="7" name="coming_eps_missed_range" id="coming_eps_missed_range" value="${sickbeard.COMING_EPS_MISSED_RANGE}" class="form-control input-sm input75" />
-                                    <p>Set the range in days of the missed episodes in the Coming Episode page</p>
+                                    <p>Set the range in days of the missed episodes in the Schedule page</p>
                                 </span>
                             </label>
                         </div>
@@ -375,7 +356,12 @@
                                 <label for="network">
                                     <input type="radio" name="timezone_display" id="network" value="network" ${('', 'checked="checked"')[sickbeard.TIMEZONE_DISPLAY == "network"]} />Network
                                 </label>
-                                <div class="clear-left"><p>display dates and times in either your timezone or the shows network timezone</p></div>
+                                <div class="clear-left">
+                                <p>display dates and times in either your timezone or the shows network timezone</p>
+                                </div>
+                                <div class="clear-left">
+                                <p> <b>Note:</b> Use local timezone to start searching for episodes minutes after show ends (depends on your dailysearch frequency)</p>
+                                </div>
                             </span>
                         </div>
 
@@ -413,7 +399,10 @@
                                 <span class="component-desc">
                                     <input type="text" name="api_key" id="api_key" value="${sickbeard.API_KEY}" class="form-control input-sm input300" readonly="readonly" />
                                     <input class="btn btn-inline" type="button" id="generate_new_apikey" value="Generate">
-                                    <div class="clear-left"><p>used to give 3rd party programs limited access to SickRage</p></div>
+                                    <div class="clear-left">
+                                        <p>used to give 3rd party programs limited access to SickRage</p>
+                                        <p>you can try all the features of the API <a href="${srRoot}/apibuilder/">here</a></p>
+                                    </div>
                                 </span>
                             </label>
                         </div>
@@ -622,25 +611,42 @@
                                 </span>
                             </label>
                         </div>
+
+                        <div class="field-pair">
+                            <label for="skip_removed_files">
+                                <span class="component-title">Skip Remove Detection</span>
+                                <span class="component-desc">
+                                <input type="checkbox" name="skip_removed_files" id="skip_removed_files" ${('', 'checked="checked"')[bool(sickbeard.SKIP_REMOVED_FILES)]}/>
+                                <p>Skip detection of removed files. If disable it will set default deleted status</p>
+                                 </span>
+                                <div class="clear-left">
+                                <span class="component-desc"><b>NOTE:</b> This may mean SickRage misses renames as well</span>
+                                </div>
+                        </div>
+
                         <div class="field-pair">
                             <label for="ep_default_deleted_status">
                                 <span class="component-title">Default deleted episode status:</span>
                                     <span class="component-desc">
 % if not sickbeard.SKIP_REMOVED_FILES:
                                         <select name="ep_default_deleted_status" id="ep_default_deleted_status" class="form-control input-sm">
-                                        % for defStatus in [ARCHIVED, IGNORED]:
-                                            <option value="${defStatus}" ${('', 'selected="selected"')[sickbeard.EP_DEFAULT_DELETED_STATUS == defStatus]}>${statusStrings[defStatus]}</option>
+                                        % for defStatus in [SKIPPED, IGNORED, ARCHIVED]:
+                                            <option value="${defStatus}" ${('', 'selected="selected"')[int(sickbeard.EP_DEFAULT_DELETED_STATUS) == defStatus]}>${statusStrings[defStatus]}</option>
                                         % endfor
                                         </select>
 % else:
                                         <select name="ep_default_deleted_status" id="ep_default_deleted_status" class="form-control input-sm" disabled="disabled">
-                                        % for defStatus in [ARCHIVED, IGNORED]:
+                                        % for defStatus in [SKIPPED, IGNORED]:
                                             <option value="${defStatus}" ${('', 'selected="selected"')[sickbeard.EP_DEFAULT_DELETED_STATUS == defStatus]}>${statusStrings[defStatus]}</option>
                                         % endfor
                                         </select>
                                         <input type="hidden" name="ep_default_deleted_status" value="${sickbeard.EP_DEFAULT_DELETED_STATUS}" />
 % endif
                                     <span>Define the status to be set for media file that has been deleted.</span>
+                                    <div class="clear-left">
+                                    <p> <b>NOTE:</b> Archived option will keep previous downloaded quality</p>
+                                    <p>Example: Downloaded (1080p WEB-DL) ==> Archived (1080p WEB-DL)</p>
+                                    </div>
                                 </span>
                             </label>
                         </div>
@@ -729,7 +735,7 @@
                             </label>
                         </div>
 
-                        <div class="field-pair">
+                        <div class="field-pair" hidden>
                             <label for="git_reset">
                                 <span class="component-title">Git reset</span>
                                 <span class="component-desc">

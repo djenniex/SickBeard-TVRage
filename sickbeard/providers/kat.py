@@ -20,22 +20,23 @@
 from __future__ import with_statement
 
 import traceback
-import urllib
-import re
+
 import datetime
+from urllib import urlencode
+
+import xmltodict
+import HTMLParser
 
 import sickbeard
-import generic
-
-from sickbeard.common import Quality
 from sickbeard import logger
 from sickbeard import tvcache
 from sickbeard import helpers
 from sickbeard import db
 from sickbeard import classes
-from sickbeard.show_name_helpers import allPossibleShowNames, sanitizeSceneName
-from unidecode import unidecode
-
+from sickbeard.common import Quality
+from sickbeard.common import USER_AGENT
+from sickbeard.providers import generic
+from xml.parsers.expat import ExpatError
 
 class KATProvider(generic.TorrentProvider):
     def __init__(self):
@@ -43,153 +44,131 @@ class KATProvider(generic.TorrentProvider):
         generic.TorrentProvider.__init__(self, "KickAssTorrents")
 
         self.supportsBacklog = True
+        self.public = True
 
         self.enabled = False
-        self.confirmed = False
+        self.confirmed = True
         self.ratio = None
         self.minseed = None
         self.minleech = None
 
         self.cache = KATCache(self)
 
-        self.urls = {'base_url': 'https://kat.cr/'}
+        self.urls = {
+            'base_url': 'https://kat.cr/',
+            'search': 'https://kat.cr/usearch/',
+            'rss': 'https://kat.cr/tv/',
+        }
 
         self.url = self.urls['base_url']
+        self.headers.update({'User-Agent': USER_AGENT})
+
+        self.search_params = {
+            'q': '',
+            'field': 'seeders',
+            'sorder': 'desc',
+            'rss': 1,
+            'category': 'tv'
+        }
 
     def isEnabled(self):
         return self.enabled
 
-    def imageName(self):
-        return 'kat.png'
-
-    def _get_season_search_strings(self, ep_obj):
-        search_string = {'Season': []}
-
-        for show_name in set(allPossibleShowNames(self.show)):
-            ep_string = sanitizeSceneName(show_name) + ' '
-            if ep_obj.show.air_by_date or ep_obj.show.sports:
-                ep_string += str(ep_obj.airdate).split('-')[0]
-                search_string['Season'].append(ep_string)
-            elif ep_obj.show.anime:
-                ep_string += "%02d" % ep_obj.scene_absolute_number
-                search_string['Season'].append(ep_string)
-            else:
-                ep_string = '%s S%02d -S%02dE category:tv' % (sanitizeSceneName(show_name), ep_obj.scene_season, ep_obj.scene_season) #1) showName SXX -SXXE
-                search_string['Season'].append(ep_string)
-                ep_string = '%s "Season %d" -Ep* category:tv' % (sanitizeSceneName(show_name), ep_obj.scene_season) # 2) showName "Season X"
-                search_string['Season'].append(ep_string)
-
-        return [search_string]
-
-    def _get_episode_search_strings(self, ep_obj, add_string=''):
-        search_string = {'Episode': []}
-
-        for show_name in set(allPossibleShowNames(self.show)):
-            ep_string = sanitizeSceneName(show_name) + ' '
-            if self.show.air_by_date:
-                ep_string += str(ep_obj.airdate).replace('-', ' ')
-            elif self.show.sports:
-                ep_string += str(ep_obj.airdate).replace('-', ' ') + '|' + ep_obj.airdate.strftime('%b')
-            elif self.show.anime:
-                ep_string += "%02d" % ep_obj.scene_absolute_number
-            else:
-                ep_string += sickbeard.config.naming_ep_type[2] % {'seasonnumber': ep_obj.scene_season,
-                                                                   'episodenumber': ep_obj.scene_episode} + '|' + \
-                             sickbeard.config.naming_ep_type[0] % {'seasonnumber': ep_obj.scene_season,
-                                                                   'episodenumber': ep_obj.scene_episode} + ' category:tv'
-            if add_string:
-                ep_string += ' ' + add_string
-
-            search_string['Episode'].append(re.sub('\s+', ' ', ep_string))
-
-        return [search_string]
-
-    def _get_size(self, item):
-        title, url, id, seeders, leechers, size, pubdate = item
-        return size or -1
-
-    def _doSearch(self, search_params, search_mode='eponly', epcount=0, age=0, epObj=None):
+    def _doSearch(self, search_strings, search_mode='eponly', epcount=0, age=0, epObj=None):
         results = []
         items = {'Season': [], 'Episode': [], 'RSS': []}
 
-        for mode in search_params.keys():
-            for search_string in search_params[mode]:
-                if isinstance(search_string, unicode):
-                    search_string = unidecode(search_string)
+        for mode in search_strings.keys():
+            logger.log(u"Search Mode: %s" % mode, logger.DEBUG)
+            for search_string in search_strings[mode]:
+
+                self.search_params.update({'q': search_string, 'field': ('seeders', 'time_add')[mode == 'RSS']})
 
                 if mode != 'RSS':
-                    searchURL = self.url + 'usearch/%s/?field=seeders&sorder=desc&rss=1' % urllib.quote_plus(search_string)
-                else:
-                    searchURL = self.url + 'tv/?field=time_add&sorder=desc&rss=1'
-
-                logger.log(u"Search string: " + searchURL, logger.DEBUG)
+                    logger.log(u"Search string: %s" % search_string, logger.DEBUG)
 
                 try:
-                    entries = self.cache.getRSSFeed(searchURL)['entries']
-                    for item in entries or []:
+                    searchURL = self.urls[('search', 'rss')[mode == 'RSS']] + '?' + urlencode(self.search_params)
+                    logger.log(u"Search URL: %s" % searchURL, logger.DEBUG)
+                    data = self.getURL(searchURL)
+                    #data = self.getURL(self.urls[('search', 'rss')[mode == 'RSS']], params=self.search_params)
+                    if not data:
+                        logger.log("No data returned from provider", logger.DEBUG)
+                        continue
+
+                    try:
+                        data = xmltodict.parse(HTMLParser.HTMLParser().unescape(data).replace('&', '&amp;'))
+                    except ExpatError as e:
+                        logger.log(u"Failed parsing provider. Traceback: %r\n%r" % (traceback.format_exc(), data), logger.ERROR)
+                        continue
+
+                    if not all([data, 'rss' in data, 'channel' in data['rss'], 'item' in data['rss']['channel']]):
+                        logger.log(u"Malformed rss returned, skipping", logger.DEBUG)
+                        continue
+
+                    # https://github.com/martinblech/xmltodict/issues/111
+                    entries = data['rss']['channel']['item']
+                    entries = entries if isinstance(entries, list) else [entries]
+
+                    for item in entries:
                         try:
-                            link = item['link']
-                            id = item['guid']
                             title = item['title']
-                            url = item['torrent_magneturi']
-                            verified = bool(int(item['torrent_verified']) or 0)
-                            seeders = int(item['torrent_seeds'])
-                            leechers = int(item['torrent_peers'])
-                            size = int(item['torrent_contentlength'])
+
+                            # Use the torcache link kat provides,
+                            # unless it is not torcache or we are not using blackhole
+                            # because we want to use magnets if connecting direct to client
+                            # so that proxies work.
+                            download_url = item['enclosure']['@url']
+                            if sickbeard.TORRENT_METHOD != "blackhole" or 'torcache' not in download_url:
+                                download_url = item['torrent:magnetURI']
+
+                            seeders = int(item['torrent:seeds'])
+                            leechers = int(item['torrent:peers'])
+                            verified = bool(int(item['torrent:verified']) or 0)
+                            size = int(item['torrent:contentLength'])
+
+                            info_hash = item['torrent:infoHash']
+                            #link = item['link']
+
                         except (AttributeError, TypeError, KeyError):
                             continue
 
-                        if mode != 'RSS' and (seeders < self.minseed or leechers < self.minleech):
+                        try:
+                            pubdate = datetime.datetime.strptime(item['pubDate'], '%a, %d %b %Y %H:%M:%S +0000')
+                        except Exception:
+                            pubdate = datetime.datetime.today()
+
+                        if not all([title, download_url]):
+                            continue
+
+                        #Filter unseeded torrent
+                        if seeders < self.minseed or leechers < self.minleech:
+                            if mode != 'RSS':
+                                logger.log(u"Discarding torrent because it doesn't meet the minimum seeders or leechers: {0} (S:{1} L:{2})".format(title, seeders, leechers), logger.DEBUG)
                             continue
 
                         if self.confirmed and not verified:
-                            logger.log(u"KAT Provider found result " + title + " but that doesn't seem like a verified result so I'm ignoring it", logger.DEBUG)
+                            if mode != 'RSS':
+                                logger.log(u"Found result " + title + " but that doesn't seem like a verified result so I'm ignoring it", logger.DEBUG)
                             continue
 
-                        if not title or not url:
-                            continue
-
-                        try:
-                            pubdate = datetime.datetime(*item['published_parsed'][0:6])
-                        except AttributeError:
-                            try:
-                                pubdate = datetime.datetime(*item['updated_parsed'][0:6])
-                            except AttributeError:
-                                try:
-                                    pubdate = datetime.datetime(*item['created_parsed'][0:6])
-                                except AttributeError:
-                                    try:
-                                        pubdate = datetime.datetime(*item['date'][0:6])
-                                    except AttributeError:
-                                        pubdate = datetime.datetime.today()
-
-                        item = title, url, id, seeders, leechers, size, pubdate
+                        item = title, download_url, size, seeders, leechers
+                        if mode != 'RSS':
+                            logger.log(u"Found result: %s " % title, logger.DEBUG)
 
                         items[mode].append(item)
 
-                except Exception, e:
-                    logger.log(u"Failed to parsing " + self.name + " Traceback: " + traceback.format_exc(),
-                               logger.ERROR)
+                except Exception:
+                    logger.log(u"Failed parsing provider. Traceback: %r" % traceback.format_exc(), logger.ERROR)
 
-            #For each search mode sort all the items by seeders
+            #For each search mode sort all the items by seeders if available
             items[mode].sort(key=lambda tup: tup[3], reverse=True)
 
             results += items[mode]
 
         return results
 
-    def _get_title_and_url(self, item):
-        title, url, id, seeders, leechers, size, pubdate = item
-
-        if title:
-            title = self._clean_title_from_provider(title)
-
-        if url:
-            url = url.replace('&amp;', '&')
-
-        return (title, url)
-
-    def findPropers(self, search_date=datetime.datetime.today()):
+    def findPropers(self, search_date=datetime.datetime.today()-datetime.timedelta(days=1)):
         results = []
 
         myDB = db.DBConnection()
@@ -201,21 +180,18 @@ class KATProvider(generic.TorrentProvider):
             ' OR (e.status IN (' + ','.join([str(x) for x in Quality.SNATCHED]) + ')))'
         )
 
-        if not sqlResults:
-            return []
+        for sqlshow in sqlResults or []:
+            show = helpers.findCertainShow(sickbeard.showList, int(sqlshow["showid"]))
+            if show:
+                curEp = show.getEpisode(int(sqlshow["season"]), int(sqlshow["episode"]))
 
-        for sqlshow in sqlResults:
-            self.show = helpers.findCertainShow(sickbeard.showList, int(sqlshow["showid"]))
-            if self.show:
-                curEp = self.show.getEpisode(int(sqlshow["season"]), int(sqlshow["episode"]))
+                searchStrings = self._get_episode_search_strings(curEp, add_string='PROPER|REPACK')
 
-                searchString = self._get_episode_search_strings(curEp, add_string='PROPER|REPACK')
-
-                for item in self._doSearch(searchString[0]):
+                for item in self._doSearch(searchStrings[0]):
                     title, url = self._get_title_and_url(item)
                     pubdate = item[6]
 
-                    results.append(classes.Proper(title, url, pubdate, self.show))
+                    results.append(classes.Proper(title, url, pubdate, show))
 
         return results
 
@@ -224,15 +200,15 @@ class KATProvider(generic.TorrentProvider):
 
 
 class KATCache(tvcache.TVCache):
-    def __init__(self, provider):
+    def __init__(self, provider_obj):
 
-        tvcache.TVCache.__init__(self, provider)
+        tvcache.TVCache.__init__(self, provider_obj)
 
         # only poll KickAss every 10 minutes max
         self.minTime = 20
 
     def _getRSSData(self):
-        search_params = {'RSS': ['rss']}
+        search_params = {'RSS': ['']}
         return {'entries': self.provider._doSearch(search_params)}
 
 provider = KATProvider()

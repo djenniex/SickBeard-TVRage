@@ -3,19 +3,10 @@
     import sickbeard
     from sickbeard import helpers
     from sickbeard.show_queue import ShowQueueActions
+    from sickrage.helper.common import dateTimeFormat
 %>
 <%block name="scripts">
-<script type="text/javascript">
-    $(document).ready(function() {
-        $("#schedulerStatusTable").tablesorter({
-            widgets: ['saveSort', 'zebra']
-        });
-        $("#queueStatusTable").tablesorter({
-            widgets: ['saveSort', 'zebra'],
-            sortList: [[3,0], [4,0], [2,1]]
-        });
-    });
-</script>
+<script type="text/javascript" src="${srRoot}/js/new/status.js"></script>
 </%block>
 <%block name="content">
 % if not header is UNDEFINED:
@@ -111,7 +102,7 @@
                % else:
                <td></td>
                % endif
-               <td>${service.lastRun.strftime("%Y-%m-%d %H:%M:%S")}</td>
+               <td>${service.lastRun.strftime(dateTimeFormat)}</td>
                <td>${service.silent}</td>
            </tr>
            <% del service %>
@@ -159,7 +150,7 @@
                     % else:
                         <td>sickbeard.showQueueScheduler.action.currentItem.priority</td>
                     % endif
-                    <td>${sickbeard.showQueueScheduler.action.currentItem.added.strftime("%Y-%m-%d %H:%M:%S")}</td>
+                    <td>${sickbeard.showQueueScheduler.action.currentItem.added.strftime(dateTimeFormat)}</td>
                     <td>${ShowQueueActions.names[sickbeard.showQueueScheduler.action.currentItem.action_id]}</td>
                 </tr>
             % endif
@@ -191,7 +182,7 @@
                     % else:
                         <td>${item.priority}</td>
                     % endif
-                    <td>${item.added.strftime("%Y-%m-%d %H:%M:%S")}</td>
+                    <td>${item.added.strftime(dateTimeFormat)}</td>
                     <td>${ShowQueueActions.names[item.action_id]}</td>
                 </tr>
             % endfor
@@ -211,14 +202,22 @@
             <tr>
                 <td>TV Download Directory</td>
                 <td>${sickbeard.TV_DOWNLOAD_DIR}</td>
+                % if tvdirFree is not False:
                 <td>${tvdirFree} MB</td>
+                % else:
+                <td><i>Missing</i></td>
+                % endif
             </tr>
             % endif
             <tr>
                 <td rowspan=${len(rootDir)}>Media Root Directories</td>
-            % for cur_dir in rootDir:
-                <td>${cur_dir}</td>
-                <td>${rootDir[cur_dir]} MB</td>
+                % for cur_dir in rootDir:
+                    <td>${cur_dir}</td>
+                    % if rootDir[cur_dir] is not False:
+                        <td>${rootDir[cur_dir]} MB</td>
+                    % else:
+                        <td><i>Missing</i></td>
+                    % endif
             </tr>
             % endfor
         </tbody>

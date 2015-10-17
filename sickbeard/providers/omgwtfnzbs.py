@@ -24,9 +24,9 @@ import generic
 from sickbeard import tvcache
 from sickbeard import classes
 from sickbeard import logger
-from sickbeard.exceptions import AuthException
 from sickbeard import show_name_helpers
 from datetime import datetime
+from sickrage.helper.exceptions import AuthException
 
 
 class OmgwtfnzbsProvider(generic.NZBProvider):
@@ -41,6 +41,7 @@ class OmgwtfnzbsProvider(generic.NZBProvider):
         self.url = self.urls['base_url']
 
         self.supportsBacklog = True
+        self.public = False
 
     def isEnabled(self):
         return self.enabled
@@ -48,7 +49,7 @@ class OmgwtfnzbsProvider(generic.NZBProvider):
     def _checkAuth(self):
 
         if not self.username or not self.api_key:
-            raise AuthException("Your authentication credentials for " + self.name + " are missing, check your config.")
+            logger.log(u"Invalid api key. Check your settings", logger.WARNING)
 
         return True
 
@@ -67,16 +68,13 @@ class OmgwtfnzbsProvider(generic.NZBProvider):
                 description_text = parsedJSON.get('notice')
 
                 if 'information is incorrect' in parsedJSON.get('notice'):
-                    logger.log(u"Incorrect authentication credentials for " + self.name + " : " + str(description_text),
-                               logger.DEBUG)
-                    raise AuthException(
-                        "Your authentication credentials for " + self.name + " are incorrect, check your config.")
+                    logger.log(u"Invalid api key. Check your settings", logger.WARNING)
 
                 elif '0 results matched your terms' in parsedJSON.get('notice'):
                     return True
 
                 else:
-                    logger.log(u"Unknown error given from " + self.name + " : " + str(description_text), logger.DEBUG)
+                    logger.log(u"Unknown error: %s"  % description_text, logger.DEBUG)
                     return False
 
             return True
@@ -112,10 +110,11 @@ class OmgwtfnzbsProvider(generic.NZBProvider):
         if retention or not params['retention']:
             params['retention'] = retention
 
-        search_url = 'https://api.omgwtfnzbs.org/json/?' + urllib.urlencode(params)
-        logger.log(u"Search url: " + search_url, logger.DEBUG)
+        searchURL = 'https://api.omgwtfnzbs.org/json/?' + urllib.urlencode(params)
+        logger.log(u"Search string: %s" % params, logger.DEBUG)
+        logger.log(u"Search URL: %s" %  searchURL, logger.DEBUG)
 
-        parsedJSON = self.getURL(search_url, json=True)
+        parsedJSON = self.getURL(searchURL, json=True)
         if not parsedJSON:
             return []
 
@@ -124,6 +123,7 @@ class OmgwtfnzbsProvider(generic.NZBProvider):
 
             for item in parsedJSON:
                 if 'release' in item and 'getnzb' in item:
+                    logger.log(u"Found result: %s " % item.get('title'), logger.DEBUG)
                     results.append(item)
 
             return results
@@ -183,7 +183,7 @@ class OmgwtfnzbsCache(tvcache.TVCache):
 
         rss_url = 'https://rss.omgwtfnzbs.org/rss-download.php?' + urllib.urlencode(params)
 
-        logger.log(self.provider.name + u" cache update URL: " + rss_url, logger.DEBUG)
+        logger.log(u"Cache update URL: %s" % rss_url, logger.DEBUG)
 
         return self.getRSSFeed(rss_url)
 
