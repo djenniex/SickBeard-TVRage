@@ -17,7 +17,6 @@
 # You should have received a copy of the GNU General Public License
 # along with SickRage.  If not, see <http://www.gnu.org/licenses/>.
 
-from __future__ import with_statement
 
 import os
 import re
@@ -72,7 +71,7 @@ def _downloadResult(result):
 
         # save the data to disk
         try:
-            with ek(open, fileName, 'w') as fileOut:
+            with ek(io.open, fileName, 'w') as fileOut:
                 fileOut.write(result.extraInfo[0])
 
             helpers.chmodAsParent(fileName)
@@ -133,7 +132,7 @@ def snatchEpisode(result, endStatus=SNATCHED):
             dlResult = _downloadResult(result)
         else:
             if not result.content and not result.url.startswith('magnet'):
-                result.content = result.provider.getURL(result.url)
+                result.content = result.provider.getURL(result.url, needBytes=True)
 
             if result.content or result.url.startswith('magnet'):
                 client = clients.getClientIstance(sickbeard.TORRENT_METHOD)()
@@ -142,7 +141,7 @@ def snatchEpisode(result, endStatus=SNATCHED):
                 logger.log(u"Torrent file content is empty", logger.WARNING)
                 dlResult = False
     else:
-        logger.log(u"Unknown result type, unable to download it", logger.ERROR)
+        logger.log(u"Unknown result type, unable to download it (%r)" % result.resultType, logger.ERROR)
         dlResult = False
 
     if not dlResult:
@@ -168,7 +167,12 @@ def snatchEpisode(result, endStatus=SNATCHED):
             sql_l.append(curEpObj.get_sql())
 
         if curEpObj.status not in Quality.DOWNLOADED:
-            notifiers.notify_snatch(curEpObj._format_pattern('%SN - %Sx%0E - %EN - %QN') + " from " + result.provider.name)
+            try:
+                notifiers.notify_snatch(curEpObj._format_pattern('%SN - %Sx%0E - %EN - %QN') + " from " + result.provider.name)
+            except:
+                # Without this, when notification fail, it crashes the snatch thread and SR will
+                # keep snatching until notification is sent
+                logger.log(u"Failed to send snatch notification", logger.DEBUG)
 
             trakt_data.append((curEpObj.season, curEpObj.episode))
 
@@ -211,7 +215,7 @@ def pickBestResult(results, show):
             if not show.release_groups.is_valid(cur_result):
                 continue
 
-        logger.log("Quality of " + cur_result.name + " is " + Quality.qualityStrings[cur_result.quality])
+        logger.log(u"Quality of " + cur_result.name + " is " + Quality.qualityStrings[cur_result.quality])
 
         anyQualities, bestQualities = Quality.splitQuality(show.quality)
 

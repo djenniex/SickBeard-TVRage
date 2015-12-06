@@ -34,12 +34,14 @@ from name_parser.parser import NameParser, InvalidNameException, InvalidShowExce
 
 resultFilters = [
     "sub(bed|ed|pack|s)",
-    "(dk|fin|heb|kor|nor|nordic|pl|swe)sub(bed|ed|s)?",
-    "(dir|sample|sub|nfo)fix",
-    "sample",
+    "(dir|sub|nfo)fix",
+    "(?<!shomin.)sample",
     "(dvd)?extras",
     "dub(bed)?"
 ]
+
+if hasattr('General','ignored_subs_list') and sickbeard.IGNORED_SUBS_LIST:
+    resultFilters.append("(" + sickbeard.IGNORED_SUBS_LIST.replace(",", "|") + ")sub(bed|ed|s)?")
 
 
 def containsAtLeastOneWord(name, words):
@@ -326,8 +328,8 @@ def allPossibleShowNames(show, season=-1):
                 elif curName.endswith(' (' + curCountry + ')'):
                     newShowNames.append(curName.replace(' (' + curCountry + ')', ' (' + country_list[curCountry] + ')'))
 
-            # if we have "Show Name (2013)" this will strip the (2013) show year from the show name
-            #newShowNames.append(re.sub('\(\d{4}\)','',curName))
+            # # if we have "Show Name (2013)" this will strip the (2013) show year from the show name
+            # newShowNames.append(re.sub('\(\d{4}\)', '', curName))
 
         showNames += newShowNames
 
@@ -350,7 +352,7 @@ def determineReleaseName(dir_name=None, nzb_name=None):
 
         reg_expr = re.compile(fnmatch.translate(search), re.IGNORECASE)
         files = [file_name for file_name in ek(os.listdir, dir_name) if
-                 ek(os.path.isfile, ek(os.path.join, dir_name, file_name))]
+                 ek(os.path.isfile,ek(os.path.join, dir_name, file_name))]
         results = filter(reg_expr.search, files)
 
         if len(results) == 1:

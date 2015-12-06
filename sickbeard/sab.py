@@ -20,6 +20,7 @@
 import urllib, httplib
 
 import sickbeard
+import datetime
 
 import MultipartPostHandler
 import urllib2, cookielib
@@ -52,6 +53,14 @@ def sendNZB(nzb):
     category = sickbeard.SAB_CATEGORY
     if nzb.show.is_anime:
         category = sickbeard.SAB_CATEGORY_ANIME
+
+    # if it aired more than 7 days ago, override with the backlog category IDs
+    for curEp in nzb.episodes:
+        if datetime.date.today() - curEp.airdate > datetime.timedelta(days=7):
+            category = sickbeard.SAB_CATEGORY_BACKLOG
+            if nzb.show.is_anime:
+                category = sickbeard.SAB_CATEGORY_ANIME_BACKLOG
+
     if category != None:
         params['cat'] = category
 
@@ -68,7 +77,7 @@ def sendNZB(nzb):
         if nzb.provider.getID() == 'newzbin':
             id = nzb.provider.getIDFromURL(nzb.url)
             if not id:
-                logger.log("Unable to send NZB to sab, can't find ID in URL " + str(nzb.url), logger.ERROR)
+                logger.log(u"Unable to send NZB to sab, can't find ID in URL " + str(nzb.url), logger.ERROR)
                 return False
             params['mode'] = 'addid'
             params['name'] = id

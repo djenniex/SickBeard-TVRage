@@ -33,6 +33,7 @@ class InternalExtensionManager(ExtensionManager):
 
 provider_manager = InternalExtensionManager('subliminal.providers', [EntryPoint.parse(ep) for ep in (
     'addic7ed = subliminal.providers.addic7ed:Addic7edProvider',
+    'legendastv = subliminal.providers.legendastv:LegendasTvProvider',
     'napiprojekt = subliminal.providers.napiprojekt:NapiProjektProvider',
     'opensubtitles = subliminal.providers.opensubtitles:OpenSubtitlesProvider',
     'podnapisi = subliminal.providers.podnapisi:PodnapisiProvider',
@@ -362,7 +363,7 @@ def download_best_subtitles(videos, languages, min_score=0, hearing_impaired=Fal
     checked_videos = []
     for video in videos:
         if not check_video(video, languages=languages, undefined=only_one):
-            logger.info('Skipping video %r')
+            logger.info('Skipping video %r', video)
             continue
         checked_videos.append(video)
 

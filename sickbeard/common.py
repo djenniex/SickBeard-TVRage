@@ -23,7 +23,12 @@ import platform
 import re
 import uuid
 
+from UserDict import UserDict
+from itertools import chain
 from random import shuffle
+
+import shutil
+from sickrage.helper.encoding import ek
 
 SPOOF_USER_AGENT = False
 
@@ -89,7 +94,7 @@ ARCHIVED = 6  # episodes that you don't have locally (counts toward download com
 IGNORED = 7  # episodes that you don't want included in your download stats
 SNATCHED_PROPER = 9  # qualified with quality
 SUBTITLED = 10  # qualified with quality
-FAILED = 11  #episode downloaded or snatched we don't want
+FAILED = 11  # episode downloaded or snatched we don't want
 SNATCHED_BEST = 12  # episode redownloaded using best quality
 
 NAMING_REPEAT = 1
@@ -107,8 +112,8 @@ multiEpStrings[NAMING_EXTEND] = "Extend"
 multiEpStrings[NAMING_LIMITED_EXTEND] = "Extend (Limited)"
 multiEpStrings[NAMING_LIMITED_EXTEND_E_PREFIXED] = "Extend (Limited, E-prefixed)"
 
-# pylint: disable=W0232,C1001
-class Quality:
+# pylint: disable=W0232
+class Quality(object):
     NONE = 0  # 0
     SDTV = 1  # 1
     SDDVD = 1 << 1  # 2
@@ -138,6 +143,18 @@ class Quality:
                       HDBLURAY: "720p BluRay",
                       FULLHDBLURAY: "1080p BluRay"}
 
+    sceneQualityStrings = {NONE: "N/A",
+                           UNKNOWN: "Unknown",
+                           SDTV: "HDTV",
+                           SDDVD: "",
+                           HDTV: "720p HDTV",
+                           RAWHDTV: "1080i HDTV",
+                           FULLHDTV: "1080p HDTV",
+                           HDWEBDL: "720p WEB-DL",
+                           FULLHDWEBDL: "1080p WEB-DL",
+                           HDBLURAY: "720p BluRay",
+                           FULLHDBLURAY: "1080p BluRay"}
+
     combinedQualityStrings = {ANYHDTV: "HDTV",
                               ANYWEBDL: "WEB-DL",
                               ANYBLURAY: "BluRay"}
@@ -163,6 +180,7 @@ class Quality:
                       FAILED: "Failed",
                       SNATCHED_BEST: "Snatched (Best)",
                       ARCHIVED: "Archived"}
+
     @staticmethod
     def _getStatusStrings(status):
         """
@@ -209,7 +227,7 @@ class Quality:
         :return: Quality prefix
         """
 
-        #Try Scene names first
+        # Try Scene names first
         quality = Quality.sceneQuality(name, anime)
         if quality != Quality.UNKNOWN:
             return quality
@@ -237,7 +255,7 @@ class Quality:
         if not name:
             return ret
 
-        name = os.path.basename(name)
+        name = ek(os.path.basename, name)
 
         checkName = lambda list, func: func([re.search(x, name, re.I) for x in list])
 
@@ -265,29 +283,29 @@ class Quality:
 
             return ret
 
-        if checkName([r"([sp]d.?tv|hd.?tv|dsr|tv(rip|mux)|satrip).(xvid|x26[45]|h.?26[45])"], all) and not checkName([r"(720|1080)[pi]"], all) and\
-                not checkName([r"hr.ws.pdtv.x26[45]"], any):
+        if (checkName([r"480p|web.?dl|web(rip|mux|hd)|[sph]d.?tv|dsr|tv(rip|mux)|satrip", r"xvid|divx|[xh].?26[45]"], all)
+                and not checkName([r"(720|1080)[pi]"], all) and not checkName([r"hr.ws.pdtv.[xh].?26[45]"], any)):
             ret = Quality.SDTV
-        elif checkName([r"web.?dl|web(rip|mux)", r"xvid|x26[45]|h.?26[45]"], all) and not checkName([r"(720|1080)[pi]"], all):
-            ret = Quality.SDTV
-        elif checkName([r"(dvd(rip|mux)|b[rd](rip|mux)|blue?-?ray)(.ws)?.(xvid|divx|[xh].?26[45])"], any) and not checkName([r"(720|1080)[pi]"], all):
+        elif (checkName([r"dvd(rip|mux)|b[rd](rip|mux)|blue?-?ray", r"xvid|divx|[xh].?26[45]"], all)
+              and not checkName([r"(720|1080)[pi]"], all) and not checkName([r"hr.ws.pdtv.[xh].?26[45]"], any)):
             ret = Quality.SDDVD
-        elif checkName([r"720p", r"hd.?tv", r"[xh].?26[45]"], all) or checkName([r"hr.ws.pdtv.[xh].?26[45]"], any) and not checkName(
-                [r"1080[pi]"], all):
+        elif (checkName([r"720p", r"hd.?tv", r"[xh].?26[45]"], all) or checkName([r"hr.ws.pdtv.[xh].?26[45]"], any)
+              and not checkName([r"1080[pi]"], all)):
             ret = Quality.HDTV
         elif checkName([r"720p|1080i", r"hd.?tv", r"mpeg-?2"], all) or checkName([r"1080[pi].hdtv", r"h.?26[45]"], all):
             ret = Quality.RAWHDTV
         elif checkName([r"1080p", r"hd.?tv", r"[xh].?26[45]"], all):
             ret = Quality.FULLHDTV
-        elif checkName([r"720p", r"web.?dl|web(rip|mux)"], all) or checkName([r"720p", r"itunes", r"[xh].?26[45]"], all):
+        elif checkName([r"720p", r"web.?dl|web(rip|mux|hd)"], all) or checkName([r"720p", r"itunes", r"[xh].?26[45]"], all):
             ret = Quality.HDWEBDL
-        elif checkName([r"1080p", r"web.?dl|web(rip|mux)"], all) or checkName([r"1080p", r"itunes", r"[xh].?26[45]"], all):
+        elif checkName([r"1080p", r"web.?dl|web(rip|mux|hd)"], all) or checkName([r"1080p", r"itunes", r"[xh].?26[45]"], all):
             ret = Quality.FULLHDWEBDL
         elif checkName([r"720p", r"blue?-?ray|hddvd|b[rd](rip|mux)", r"[xh].?26[45]"], all):
             ret = Quality.HDBLURAY
         elif checkName([r"1080p", r"blue?-?ray|hddvd|b[rd](rip|mux)", r"[xh].?26[45]"], all):
             ret = Quality.FULLHDBLURAY
 
+        del checkName
         return ret
 
     @staticmethod
@@ -298,25 +316,23 @@ class Quality:
         :param name: File name of episode to analyse
         :return: Quality prefix
         """
+
         quality = Quality.qualityFromFileMeta(name)
         if quality != Quality.UNKNOWN:
             return quality
-
-        if name.lower().endswith(".ts"):
+        elif name.lower().endswith(".ts"):
             return Quality.RAWHDTV
-        else:
-            return Quality.UNKNOWN
+
+        return Quality.UNKNOWN
 
     @staticmethod
     def qualityFromFileMeta(filename):
         """
-        Get quality file file metadata
+        Get quality from file metadata
 
         :param filename: Filename to analyse
         :return: Quality prefix
         """
-
-        # pylint: disable=R0912
 
         from hachoir_parser import createParser
         from hachoir_metadata import extractMetadata
@@ -324,56 +340,36 @@ class Quality:
         log.use_print = False
 
         try:
-            parser = createParser(filename)
-        # pylint: disable=W0703
-        except Exception:
-            parser = None
-
-        if not parser:
-            return Quality.UNKNOWN
-
-        try:
-            metadata = extractMetadata(parser)
-        # pylint: disable=W0703
-        except Exception:
-            metadata = None
-
-        try:
-            # pylint: disable=W0212
+            tmpFile = filename + ".tmp"
+            ek(shutil.copyfile, filename, tmpFile)
+            parser = createParser(tmpFile)
+            file_metadata = extractMetadata(parser)
             parser.stream._input.close()
-        # pylint: disable=W0703
+            os.remove(tmpFile)
+
+            if not file_metadata:
+                raise
+
+            height = 0
+            for metadata in chain([file_metadata], file_metadata.iterGroups()):
+                height = metadata.get('height')
+                if height:
+                    break
         except Exception:
-            pass
-
-        if not metadata:
             return Quality.UNKNOWN
 
-        height = 0
-        if metadata.has('height'):
-            height = int(metadata.get('height') or 0)
-        else:
-            test = getattr(metadata, "iterGroups", None)
-            if callable(test):
-                for metagroup in metadata.iterGroups():
-                    if metagroup.has('height'):
-                        height = int(metagroup.get('height') or 0)
+        base_filename = ek(os.path.basename, filename)
+        bluray = re.search(r"blue?-?ray|hddvd|b[rd](rip|mux)", base_filename, re.I) is not None
+        webdl = re.search(r"web.?dl|web(rip|mux|hd)", base_filename, re.I) is not None
 
-        if not height:
-            return Quality.UNKNOWN
-
-        base_filename = os.path.basename(filename)
-        bluray = re.search(r'b[rd]rip|blue?-?ray', base_filename, re.I) is not None
-        webdl = re.search(r'web.?dl|webrip', base_filename, re.I) is not None
-
-        ret = Quality.UNKNOWN
         if height > 1000:
-            ret = ((Quality.FULLHDTV, Quality.FULLHDBLURAY)[bluray], Quality.FULLHDWEBDL)[webdl]
+            return ((Quality.FULLHDTV, Quality.FULLHDBLURAY)[bluray], Quality.FULLHDWEBDL)[webdl]
         elif height > 680 and height < 800:
-            ret = ((Quality.HDTV, Quality.HDBLURAY)[bluray], Quality.HDWEBDL)[webdl]
+            return ((Quality.HDTV, Quality.HDBLURAY)[bluray], Quality.HDWEBDL)[webdl]
         elif height < 680:
-            ret = (Quality.SDTV, Quality.SDDVD)[re.search(r'dvd|b[rd]rip|blue?-?ray', base_filename, re.I) is not None]
+            return (Quality.SDTV, Quality.SDDVD)[re.search(r'dvd|b[rd]rip|blue?-?ray', base_filename, re.I) is not None]
 
-        return ret
+        return Quality.UNKNOWN
 
     @staticmethod
     def compositeStatus(status, quality):
@@ -394,6 +390,65 @@ class Quality:
                 return (status - q * 100, q)
 
         return (status, Quality.NONE)
+
+    @staticmethod
+    def sceneQualityFromName(name, quality):
+        """
+        Get scene naming parameters from filename and quality
+
+        :param name: Filename to check
+        :param quality: int of quality to make sure we get the right rip type
+        :return: encoder type for scene quality naming
+        """
+        codecList = ['xvid', 'divx']
+        x264List = ['x264', 'x 264', 'x.264']
+        h264List = ['h264', 'h 264', 'h.264', 'avc']
+        x265List = ['x265', 'x 265', 'x.265']
+        h265List = ['h265', 'h 265', 'h.265', 'hevc']
+        codecList.extend(x264List + h264List + x265List + h265List)
+
+        found_codecs = {}
+        found_codec = None
+
+        for codec in codecList:
+            if codec in name.lower():
+                found_codecs[name.lower().rfind(codec)] = codec
+
+        if found_codecs:
+            sorted_codecs = sorted(found_codecs, reverse=True)
+            found_codec = found_codecs[list(sorted_codecs)[0]]
+
+        # 2 corresponds to SDDVD quality
+        if quality == 2:
+            if re.search(r"b(r|d|rd)?(-| |\.)?(rip|mux)", name.lower()):
+                rip_type = " BDRip"
+            elif re.search(r"(dvd)(-| |\.)?(rip|mux)?", name.lower()):
+                rip_type = " DVDRip"
+            else:
+                rip_type = ""
+
+        if found_codec:
+            if codecList[0] in found_codec:
+                found_codec = 'XviD'
+            elif codecList[1] in found_codec:
+                found_codec = 'DivX'
+            elif found_codec in x264List:
+                found_codec = x264List[0]
+            elif found_codec in h264List:
+                found_codec = h264List[0]
+            elif found_codec in x265List:
+                found_codec = x265List[0]
+            elif found_codec in h265List:
+                found_codec = h265List[0]
+
+            if quality == 2:
+                return rip_type + " " + found_codec
+            else:
+                return " " + found_codec
+        elif quality == 2:
+            return rip_type
+        else:
+            return ""
 
     @staticmethod
     def statusFromName(name, assume=True, anime=False):
@@ -442,45 +497,89 @@ qualityPresetStrings = {SD: "SD",
                         ANY: "Any"}
 
 
-# pylint: disable=R0903,C1001
-class StatusStrings:
-    def __init__(self):
-        self.statusStrings = {UNKNOWN: "Unknown",
-                              UNAIRED: "Unaired",
-                              SNATCHED: "Snatched",
-                              DOWNLOADED: "Downloaded",
-                              SKIPPED: "Skipped",
-                              SNATCHED_PROPER: "Snatched (Proper)",
-                              WANTED: "Wanted",
-                              ARCHIVED: "Archived",
-                              IGNORED: "Ignored",
-                              SUBTITLED: "Subtitled",
-                              FAILED: "Failed",
-                              SNATCHED_BEST: "Snatched (Best)"}
+class StatusStrings(UserDict):
+    """
+    Dictionary containing strings for status codes
 
-    def __getitem__(self, key):
-        key = int(key)
-        if key in Quality.DOWNLOADED + Quality.SNATCHED + Quality.SNATCHED_PROPER + Quality.SNATCHED_BEST + Quality.ARCHIVED:
-            status, quality = Quality.splitCompositeStatus(key)
-            if quality == Quality.NONE:
-                return self.statusStrings[status]
+    Keys must be convertible to int or a ValueError will be raised.  This is intentional to match old functionality until
+    the old StatusStrings is fully deprecated, then we will raise a KeyError instead, where appropriate.
+
+    Membership checks using __contains__ (i.e. 'x in y') do not raise a ValueError to match expected dict functionality
+    """
+    # todo: Deprecate StatusStrings().statusStrings and use StatusStrings() directly
+    # todo: Deprecate .has_key and switch to 'x in y'
+    # todo: Switch from raising ValueError to a saner KeyError
+    # todo: Raise KeyError when unable to resolve a missing key instead of returning ''
+    # todo: Make key of None match dict() functionality
+
+    @property
+    def statusStrings(self):  # for backwards compatibility
+        return self.data
+
+    def __setitem__(self, key, value):
+        self.data[int(key)] = value  # make sure all keys being assigned values are ints
+
+    def __missing__(self, key):
+        """
+        If the key is not found, search for the missing key in qualities
+
+        Keys must be convertible to int or a ValueError will be raised.  This is intentional to match old functionality until
+        the old StatusStrings is fully deprecated, then we will raise a KeyError instead, where appropriate.
+        """
+        if isinstance(key, int):  # if the key is already an int...
+            if key in self.keys() + Quality.DOWNLOADED + Quality.SNATCHED + Quality.SNATCHED_PROPER + Quality.SNATCHED_BEST + Quality.ARCHIVED:
+                status, quality = Quality.splitCompositeStatus(key)
+                if quality == Quality.NONE:  # If a Quality is not listed... (shouldn't this be 'if not quality:'?)
+                    return self[status]  # ...return the status...
+                else:
+                    return self[status] + " (" + Quality.qualityStrings[quality] + ")"  # ...otherwise append the quality to the status
             else:
-                return self.statusStrings[status] + " (" + Quality.qualityStrings[quality] + ")"
-        else:
-            return self.statusStrings[key] if self.statusStrings.has_key(key) else ''
+                return ''  # return '' to match old functionality when the numeric key is not found
+        return self[int(key)]  # Since the key was not an int, let's try int(key) instead
 
+    # Keep this until all has_key() checks are converted to 'key in dict'
+    # or else has_keys() won't search __missing__ for keys
     def has_key(self, key):
-        key = int(key)
-        return key in self.statusStrings or key in Quality.DOWNLOADED + Quality.ARCHIVED + Quality.SNATCHED + Quality.SNATCHED_PROPER + Quality.SNATCHED_BEST
+        """
+        Override has_key() to test membership using an 'x in y' search
+
+        Keys must be convertible to int or a ValueError will be raised.  This is intentional to match old functionality until
+        the old StatusStrings is fully deprecated, then we will raise a KeyError instead, where appropriate.
+        """
+        return key in self  # This will raise a ValueError if __missing__ can't convert the key to int
 
     def __contains__(self, key):
-        return self.has_key(key)
+        """
+        Checks for existence of key
 
-statusStrings = StatusStrings()
+        Unlike has_key() and __missing__() this will NOT raise a ValueError to match expected functionality
+        when checking for 'key in dict'
+        """
+        try:
+            # This will raise a ValueError if we can't convert the key to int
+            return ((int(key) in self.data) or
+                    (int(key) in Quality.DOWNLOADED + Quality.SNATCHED + Quality.SNATCHED_PROPER + Quality.SNATCHED_BEST + Quality.ARCHIVED))
+        except ValueError:  # The key is not numeric and since we only want numeric keys...
+            # ...and we don't want this function to fail...
+            pass  # ...suppress the ValueError and do nothing, the key does not exist
 
+statusStrings = StatusStrings(
+    {UNKNOWN: "Unknown",
+     UNAIRED: "Unaired",
+     SNATCHED: "Snatched",
+     DOWNLOADED: "Downloaded",
+     SKIPPED: "Skipped",
+     SNATCHED_PROPER: "Snatched (Proper)",
+     WANTED: "Wanted",
+     ARCHIVED: "Archived",
+     IGNORED: "Ignored",
+     SUBTITLED: "Subtitled",
+     FAILED: "Failed",
+     SNATCHED_BEST: "Snatched (Best)"
+     })
 
-# pylint: disable=R0903,C1001
-class Overview:
+# pylint: disable=R0903
+class Overview(object):
 
     UNAIRED = UNAIRED  # 1
     QUAL = 2

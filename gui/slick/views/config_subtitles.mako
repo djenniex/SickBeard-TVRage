@@ -34,11 +34,12 @@ $('#subtitles_dir').fileBrowser({ title: 'Select Subtitles Download Directory' }
 
             <div id="config-components">
                 <ul>
-                    <li><a href="#core-component-group4">Subtitles Search</a></li>
+                    <li><a href="#core-component-group1">Subtitles Search</a></li>
                     <li><a href="#core-component-group2">Subtitles Plugin</a></li>
+                    <li><a href="#core-component-group3">Plugin Settings</a></li>
                 </ul>
 
-                <div id="core-component-group4" class="component-group">
+                <div id="core-component-group1" class="component-group">
 
                     <div class="component-group-desc">
                         <h3>Subtitles Search</h3>
@@ -58,13 +59,13 @@ $('#subtitles_dir').fileBrowser({ title: 'Select Subtitles Download Directory' }
                                 <div class="field-pair">
                                     <label>
                                         <span class="component-title">Subtitle Languages</span>
-                                        <span class="component-desc"><input type="text" id="subtitles_languages" name="subtitles_languages" /></span>
+                                        <span class="component-desc"><input type="text" id="subtitles_languages" name="subtitles_languages" autocapitalize="off" /></span>
                                     </label>
                                 </div>
                                 <div class="field-pair">
                                     <label>
                                         <span class="component-title">Subtitle Directory</span>
-                                        <input type="text" value="${sickbeard.SUBTITLES_DIR}" id="subtitles_dir" name="subtitles_dir" class="form-control input-sm input350">
+                                        <input type="text" value="${sickbeard.SUBTITLES_DIR}" id="subtitles_dir" name="subtitles_dir" class="form-control input-sm input350" autocapitalize="off" />
                                     </label>
                                     <label>
                                             <span class="component-title">&nbsp;</span>
@@ -111,9 +112,18 @@ $('#subtitles_dir').fileBrowser({ title: 'Select Subtitles Download Directory' }
                                     </label>
                                 </div>
                                 <div class="field-pair">
+                                    <label class="clearfix" for="subtitles_hearing_impaired">
+                                        <span class="component-title">Hearing Impaired Subtitles</span>
+                                        <span class="component-desc">
+                                            <input type="checkbox" name="subtitles_hearing_impaired" id="subtitles_hearing_impaired" ${('', 'checked="checked"')[bool(sickbeard.SUBTITLES_HEARING_IMPAIRED)]}/>
+                                            <p>Download hearing impaired style subtitles?</p>
+                                        </span>
+                                    </label>
+                                </div>
+                                <div class="field-pair">
                                     <label class="nocheck">
                                         <span class="component-title">Extra Scripts</span>
-                                           <input type="text" name="subtitles_extra_scripts" value="<%'|'.join(sickbeard.SUBTITLES_EXTRA_SCRIPTS)%>" class="form-control input-sm input350" />
+                                           <input type="text" name="subtitles_extra_scripts" value="<%'|'.join(sickbeard.SUBTITLES_EXTRA_SCRIPTS)%>" class="form-control input-sm input350" autocapitalize="off" />
                                     </label>
                                     <label class="nocheck">
                                         <span class="component-title">&nbsp;</span>
@@ -136,7 +146,7 @@ $('#subtitles_dir').fileBrowser({ title: 'Select Subtitles Download Directory' }
                                     </label>
                                 </div>
 
-                        <br/><input type="submit" class="btn config_submitter" value="Save Changes" /><br/>
+                        <br><input type="submit" class="btn config_submitter" value="Save Changes" /><br>
                         </div>
                     </fieldset>
                 </div><!-- /component-group1 //-->
@@ -165,12 +175,45 @@ $('#subtitles_dir').fileBrowser({ title: 'Select Subtitles Download Directory' }
                         </ul>
                         <input type="hidden" name="service_order" id="service_order" value="<%" ".join(['%s:%d' % (x['name'], x['enabled']) for x in sickbeard.subtitles.sortedServiceList()])%>"/>
 
-                        <br/><input type="submit" class="btn config_submitter" value="Save Changes" /><br/>
+                        <br><input type="submit" class="btn config_submitter" value="Save Changes" /><br>
                     </fieldset>
                 </div><!-- /component-group2 //-->
+                <div id="core-component-group3" class="component-group">
+                    <div class="component-group-desc">
+                        <h3>Subtitle Settings</h3>
+                        <p>Set user and password for each provider</p>
+                    </div><!-- /component-group-desc //-->
 
-                <br/><input type="submit" class="btn config_submitter" value="Save Changes" /><br/>
-
+                    <fieldset class="component-group-list" style="margin-left: 50px; margin-top:36px">
+                        <%
+                            providerLoginDict = {
+                                'legendastv': {'user': sickbeard.LEGENDASTV_USER, 'pass': sickbeard.LEGENDASTV_PASS},
+                                'addic7ed': {'user': sickbeard.ADDIC7ED_USER, 'pass': sickbeard.ADDIC7ED_PASS},
+                                'opensubtitles': {'user': sickbeard.OPENSUBTITLES_USER, 'pass': sickbeard.OPENSUBTITLES_PASS}}
+                        %>
+                        % for curService in sickbeard.subtitles.sortedServiceList():
+                            % if curService['name'] not in providerLoginDict.keys():
+                                <% continue %>
+                            % endif
+                            ##<div class="field-pair${(' hidden', '')[curService['enabled']]}"> ## Need js to show/hide on save
+                            <div class="field-pair">
+                                <label class="nocheck" for="${curService['name']}_user">
+                                    <span class="component-title">${curService['name'].capitalize()} User Name</span>
+                                    <span class="component-desc">
+                                        <input type="text" name="${curService['name']}_user" id="${curService['name']}_user" value="${providerLoginDict[curService['name']]['user']}" class="form-control input-sm input300" autocapitalize="off" />
+                                    </span>
+                                </label>
+                                <label class="nocheck" for="${curService['name']}_pass">
+                                    <span class="component-title">${curService['name'].capitalize()} Password</span>
+                                    <span class="component-desc">
+                                        <input type="password" name="${curService['name']}_pass" id="${curService['name']}_pass" value="${providerLoginDict[curService['name']]['pass']}" class="form-control input-sm input300" autocapitalize="off" />
+                                    </span>
+                                </label>
+                            </div>
+                        % endfor
+                        <br><input type="submit" class="btn config_submitter" value="Save Changes" /><br>
+                    </fieldset>
+                </div><!-- /component-group3 //-->
             </div><!-- /config-components //-->
 
 </form>

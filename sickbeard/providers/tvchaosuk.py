@@ -1,4 +1,4 @@
-# This file is part of SickRage. 
+# This file is part of SickRage.
 #
 # SickRage is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -14,40 +14,31 @@
 # along with SickRage.  If not, see <http://www.gnu.org/licenses/>.
 
 import re
-import datetime
-import sickbeard
-import generic
+# from urllib import urlencode
 
-from sickbeard.common import Quality
+import sickbeard
 from sickbeard import logger
 from sickbeard import tvcache
-from sickbeard import db
-from sickbeard import classes
-from sickbeard import helpers
 from sickbeard import show_name_helpers
 from sickbeard.helpers import sanitizeSceneName
+from sickbeard.providers import generic
 from sickbeard.bs4_parser import BS4Parser
 from sickrage.helper.exceptions import AuthException
-
-from urllib import urlencode
 
 
 class TVChaosUKProvider(generic.TorrentProvider):
     def __init__(self):
         generic.TorrentProvider.__init__(self, 'TvChaosUK')
 
-        self.urls = {
-            'base_url': 'https://tvchaosuk.com/',
-            'login': 'https://tvchaosuk.com/takelogin.php',
-            'index': 'https://tvchaosuk.com/index.php',
-            'search': 'https://tvchaosuk.com/browse.php'
-            }
+        self.urls = {'base_url': 'https://tvchaosuk.com/',
+                     'login': 'https://tvchaosuk.com/takelogin.php',
+                     'index': 'https://tvchaosuk.com/index.php',
+                     'search': 'https://tvchaosuk.com/browse.php'}
 
         self.url = self.urls['base_url']
 
         self.supportsBacklog = True
-        self.public = False
-        self.enabled = False
+
         self.username = None
         self.password = None
         self.ratio = None
@@ -63,9 +54,6 @@ class TVChaosUKProvider(generic.TorrentProvider):
             'category': 0,
             'include_dead_torrents': 'no',
         }
-
-    def isEnabled(self):
-        return self.enabled
 
     def _checkAuth(self):
         if self.username and self.password:
@@ -143,15 +131,15 @@ class TVChaosUKProvider(generic.TorrentProvider):
             logger.log(u"Search Mode: %s" % mode, logger.DEBUG)
             for search_string in search_strings[mode]:
 
-                if mode != 'RSS':
+                if mode is not 'RSS':
                     logger.log(u"Search string: %s " % search_string, logger.DEBUG)
 
                 self.search_params['keywords'] = search_string.strip()
                 data = self.getURL(self.urls['search'], params=self.search_params)
-                url_searched = self.urls['search'] + '?' + urlencode(self.search_params)
+                # url_searched = self.urls['search'] + '?' + urlencode(self.search_params)
 
                 if not data:
-                    logger.log("No data returned from provider", logger.DEBUG)
+                    logger.log(u"No data returned from provider", logger.DEBUG)
                     continue
 
                 with BS4Parser(data) as html:
@@ -166,9 +154,9 @@ class TVChaosUKProvider(generic.TorrentProvider):
                             if not all([title, download_url]):
                                 continue
 
-                            #Filter unseeded torrent
+                            # Filter unseeded torrent
                             if seeders < self.minseed or leechers < self.minleech:
-                                if mode != 'RSS':
+                                if mode is not 'RSS':
                                     logger.log(u"Discarding torrent because it doesn't meet the minimum seeders or leechers: {0} (S:{1} L:{2})".format(title, seeders, leechers), logger.DEBUG)
                                 continue
 
@@ -184,48 +172,22 @@ class TVChaosUKProvider(generic.TorrentProvider):
                             # Strip year from the end or we can't parse it!
                             title = re.sub(r'[\. ]?\(\d{4}\)', '', title)
 
-                            #FIXME
+                            # FIXME
                             size = -1
 
                             item = title, download_url, size, seeders, leechers
-                            if mode != 'RSS':
+                            if mode is not 'RSS':
                                 logger.log(u"Found result: %s " % title, logger.DEBUG)
 
                             items[mode].append(item)
 
-                        except:
+                        except Exception:
                             continue
 
-            #For each search mode sort all the items by seeders if available
+            # For each search mode sort all the items by seeders if available
             items[mode].sort(key=lambda tup: tup[3], reverse=True)
 
             results += items[mode]
-
-        return results
-
-    def findPropers(self, search_date=datetime.datetime.today()):
-
-        results = []
-
-        myDB = db.DBConnection()
-        sqlResults = myDB.select(
-            'SELECT s.show_name, e.showid, e.season, e.episode, e.status, e.airdate FROM tv_episodes AS e' +
-            ' INNER JOIN tv_shows AS s ON (e.showid = s.indexer_id)' +
-            ' WHERE e.airdate >= ' + str(search_date.toordinal()) +
-            ' AND (e.status IN (' + ','.join([str(x) for x in Quality.DOWNLOADED]) + ')' +
-            ' OR (e.status IN (' + ','.join([str(x) for x in Quality.SNATCHED]) + ')))'
-        )
-
-        for sqlshow in sqlResults or []:
-            self.show = helpers.findCertainShow(sickbeard.showList, int(sqlshow['showid']))
-            if self.show:
-                curEp = self.show.getEpisode(int(sqlshow['season']), int(sqlshow['episode']))
-
-                searchString = self._get_episode_search_strings(curEp, add_string='PROPER|REPACK')
-
-                for item in self._doSearch(searchString[0]):
-                    title, url = self._get_title_and_url(item)
-                    results.append(classes.Proper(title, url, datetime.datetime.today(), self.show))
 
         return results
 
@@ -234,9 +196,9 @@ class TVChaosUKProvider(generic.TorrentProvider):
 
 
 class TVChaosUKCache(tvcache.TVCache):
-    def __init__(self, provider):
+    def __init__(self, provider_obj):
 
-        tvcache.TVCache.__init__(self, provider)
+        tvcache.TVCache.__init__(self, provider_obj)
 
         # only poll TVChaosUK every 20 minutes max
         self.minTime = 20

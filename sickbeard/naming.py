@@ -25,9 +25,9 @@ from sickbeard import tv
 from sickbeard import common
 from sickbeard import logger
 from sickbeard.name_parser.parser import NameParser
-from sickrage.helper.encoding import ek
+from sickbeard.common import Quality, DOWNLOADED
 
-from common import Quality, DOWNLOADED
+from sickrage.helper.encoding import ek
 
 name_presets = (
     '%SN - %Sx%0E - %EN',
@@ -52,7 +52,7 @@ name_sports_presets = (
 )
 
 
-class TVShow:
+class TVShow(object):
     def __init__(self):
         self.name = "Show Name"
         self.genre = "Comedy"
@@ -218,11 +218,11 @@ def validate_name(pattern, multi=None, anime_type=None, file_only=False, abd=Fal
 
     try:
         result = parser.parse(new_name)
-    except Exception, e:
+    except Exception:
         logger.log(u"Unable to parse " + new_name + ", not valid", logger.DEBUG)
         return False
 
-    logger.log("The name " + new_name + " parsed into " + str(result), logger.DEBUG)
+    logger.log(u"The name " + new_name + " parsed into " + str(result), logger.DEBUG)
 
     if abd or sports:
         if result.air_date != ep.airdate:

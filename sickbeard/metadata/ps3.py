@@ -1,3 +1,5 @@
+# coding=utf-8
+
 # Author: Nic Wolfe <nic@wolfeden.ca>
 # URL: http://code.google.com/p/sickbeard/
 #
@@ -18,7 +20,7 @@
 
 import os
 
-import generic
+from sickbeard.metadata import generic
 
 from sickrage.helper.encoding import ek
 
@@ -77,9 +79,9 @@ class PS3Metadata(generic.GenericMetadata):
     # Override with empty methods for unsupported features
     def retrieveShowMetadata(self, folder):
         # no show metadata generated, we abort this lookup function
-        return (None, None, None)
+        return None, None, None
 
-    def create_show_metadata(self, show_obj, force=False):
+    def create_show_metadata(self, show_obj):
         pass
 
     def update_show_indexer_metadata(self, show_obj):
@@ -88,7 +90,7 @@ class PS3Metadata(generic.GenericMetadata):
     def get_show_file_path(self, show_obj):
         pass
 
-    def create_episode_metadata(self, ep_obj, force=False):
+    def create_episode_metadata(self, ep_obj):
         pass
 
     def create_fanart(self, show_obj):
@@ -109,14 +111,15 @@ class PS3Metadata(generic.GenericMetadata):
     def create_season_all_banner(self, show_obj):
         pass
 
-    def get_episode_thumb_path(self, ep_obj):
+    @staticmethod
+    def get_episode_thumb_path(ep_obj):
         """
         Returns the path where the episode thumbnail should be stored. Defaults to
         the same path as the episode file but with a .cover.jpg extension.
 
         ep_obj: a TVEpisode instance for which to create the thumbnail
         """
-        if ek(os.path.isfile, ep_obj.location):
+        if ek(os.path.isfile,ep_obj.location):
             tbn_filename = ep_obj.location + ".cover.jpg"
         else:
             return None

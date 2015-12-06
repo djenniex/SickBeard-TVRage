@@ -1,12 +1,10 @@
 <%!
-    import sickbeard
     import datetime
-    from sickbeard import db, network_timezones
-    from sickbeard.common import Quality, SKIPPED, WANTED, UNAIRED, ARCHIVED, IGNORED, SNATCHED, SNATCHED_PROPER, SNATCHED_BEST, FAILED
-    from sickbeard.common import qualityPresets, qualityPresetStrings
-    import calendar
-    from time import time
     import re
+    import sickbeard
+    from sickbeard import network_timezones
+    from sickrage.show.Show import Show
+    from time import time
 
     # resource module is unix only
     has_resource_module = True
@@ -87,13 +85,12 @@
         <link rel="stylesheet" type="text/css" href="${srRoot}/css/style.css?${sbPID}"/>
         <link rel="stylesheet" type="text/css" href="${srRoot}/css/${sickbeard.THEME_NAME}.css?${sbPID}" />
         <link rel="stylesheet" type="text/css" href="${srRoot}/css/print.css?${sbPID}" />
-        % if sbLogin:
+        % if srLogin:
         <link rel="stylesheet" type="text/css" href="${srRoot}/css/lib/pnotify.custom.min.css?${sbPID}" />
         <link rel="stylesheet" type="text/css" href="${srRoot}/css/country-flags.css?${sbPID}"/>
         % endif
         <%block name="css" />
     </head>
-
     <body>
         <nav class="navbar navbar-default navbar-fixed-top hidden-print" role="navigation">
             <div class="container-fluid">
@@ -107,12 +104,13 @@
                     <a class="navbar-brand" href="${srRoot}/home/" title="SickRage"><img alt="SickRage" src="${srRoot}/images/sickrage.png" style="height: 50px;" class="img-responsive pull-left" /></a>
                 </div>
 
-            % if sbLogin:
+            % if srLogin:
                 <div class="collapse navbar-collapse" id="bs-example-navbar-collapse-1">
                     <ul class="nav navbar-nav navbar-right">
                         <li id="NAVhome" class="navbar-split dropdown${('', ' active')[topmenu == 'home']}">
-                            <a href="${srRoot}/home/" class="dropdown-toggle">Shows</a>
-                            <a href="#" class="dropdown-toggle" data-toggle="dropdown"><b class="caret"></b></a>
+                            <a href="${srRoot}/home/" class="dropdown-toggle" aria-haspopup="true" data-toggle="dropdown" data-hover="dropdown"><span>Shows</span>
+                            <b class="caret"></b>
+                            </a>
                             <ul class="dropdown-menu">
                                 <li><a href="${srRoot}/home/"><i class="menu-icon-home"></i>&nbsp;Show List</a></li>
                                 <li><a href="${srRoot}/home/addShows/"><i class="menu-icon-addshow"></i>&nbsp;Add Shows</a></li>
@@ -136,8 +134,9 @@
                         </li>
 
                         <li id="NAVmanage" class="navbar-split dropdown${('', ' active')[topmenu == 'manage']}">
-                            <a href="${srRoot}/manage/episodeStatuses/" class="dropdown-toggle">Manage</a>
-                            <a href="#" class="dropdown-toggle" data-toggle="dropdown"><b class="caret"></b></a>
+                            <a href="${srRoot}/manage/episodeStatuses/" class="dropdown-toggle" aria-haspopup="true" data-toggle="dropdown" data-hover="dropdown"><span>Manage</span>
+                            <b class="caret"></b>
+                            </a>
                             <ul class="dropdown-menu">
                                 <li><a href="${srRoot}/manage/"><i class="menu-icon-manage"></i>&nbsp;Mass Update</a></li>
                                 <li><a href="${srRoot}/manage/backlogOverview/"><i class="menu-icon-backlog-view"></i>&nbsp;Backlog Overview</a></li>
@@ -166,8 +165,9 @@
                         </li>
 
                         <li id="NAVconfig" class="navbar-split dropdown${('', ' active')[topmenu == 'config']}">
-                            <a href="${srRoot}/config/" class="dropdown-toggle"><span class="visible-xs">Config</span><img src="${srRoot}/images/menu/system18.png" class="navbaricon hidden-xs" /></a>
-                            <a href="#" class="dropdown-toggle" data-toggle="dropdown"><b class="caret"></b></a>
+                            <a href="${srRoot}/config/" class="dropdown-toggle" aria-haspopup="true" data-toggle="dropdown" data-hover="dropdown"><span class="visible-xs-inline">Config</span><img src="${srRoot}/images/menu/system18.png" class="navbaricon hidden-xs" />
+                            <b class="caret"></b>
+                            </a>
                             <ul class="dropdown-menu">
                                 <li><a href="${srRoot}/config/"><i class="menu-icon-help"></i>&nbsp;Help &amp; Info</a></li>
                                 <li><a href="${srRoot}/config/general/"><i class="menu-icon-config"></i>&nbsp;General</a></li>
@@ -202,8 +202,9 @@
                                 toolsBadge = ''
                         %>
                         <li id="NAVsystem" class="navbar-split dropdown${('', ' active')[topmenu == 'system']}">
-                            <a href="${srRoot}/home/status/" class="dropdown-toggle"><span class="visible-xs">Tools</span><img src="${srRoot}/images/menu/system18-2.png" class="navbaricon hidden-xs" />${toolsBadge}</a>
-                            <a href="#" class="dropdown-toggle" data-toggle="dropdown"><b class="caret"></b></a>
+                            <a href="${srRoot}/home/status/" class="dropdown-toggle" aria-haspopup="true" data-toggle="dropdown" data-hover="dropdown"><span class="visible-xs-inline">Tools</span><img src="${srRoot}/images/menu/system18-2.png" class="navbaricon hidden-xs" />${toolsBadge}
+                            <b class="caret"></b>
+                            </a>
                             <ul class="dropdown-menu">
                                 <li><a href="${srRoot}/news/"><i class="menu-icon-help"></i>&nbsp;News${newsBadge}</a></li>
                                 <li><a href="${srRoot}/IRC/"><i class="menu-icon-help"></i>&nbsp;IRC</a></li>
@@ -221,7 +222,7 @@
                                 <li><a href="${srRoot}/home/updateCheck?pid=${sbPID}"><i class="menu-icon-update"></i>&nbsp;Check For Updates</a></li>
                                 <li><a href="${srRoot}/home/restart/?pid=${sbPID}" class="confirm restart"><i class="menu-icon-restart"></i>&nbsp;Restart</a></li>
                                 <li><a href="${srRoot}/home/shutdown/?pid=${sbPID}" class="confirm shutdown"><i class="menu-icon-shutdown"></i>&nbsp;Shutdown</a></li>
-                                % if sbLogin != True:
+                                % if srLogin != True:
                                     <li><a href="${srRoot}/logout" class="confirm logout"><i class="menu-icon-shutdown"></i>&nbsp;Logout</a></li>
                                 % endif
                                 <li role="separator" class="divider"></li>
@@ -262,13 +263,13 @@
         </div>
         % endif
 
-        % if sickbeard.BRANCH and sickbeard.BRANCH != 'master' and not sickbeard.DEVELOPER and sbLogin:
+        % if sickbeard.BRANCH and sickbeard.BRANCH != 'master' and not sickbeard.DEVELOPER and srLogin:
         <div class="alert alert-danger upgrade-notification hidden-print" role="alert">
             <span>You're using the ${sickbeard.BRANCH} branch. Please use 'master' unless specifically asked</span>
         </div>
         % endif
 
-        % if sickbeard.NEWEST_VERSION_STRING and sbLogin:
+        % if sickbeard.NEWEST_VERSION_STRING and srLogin:
         <div class="alert alert-success upgrade-notification hidden-print" role="alert">
             <span>${sickbeard.NEWEST_VERSION_STRING}</span>
         </div>
@@ -279,55 +280,24 @@
                 <%block name="content" />
             </div> <!-- /content -->
         </div> <!-- /contentWrapper -->
-    % if sbLogin:
+    % if srLogin:
         <footer>
             <div class="footer clearfix">
             <%
-                myDB = db.DBConnection()
-                today = str(datetime.date.today().toordinal())
-                status_quality = '(%s)' % ','.join([str(quality) for quality in Quality.SNATCHED + Quality.SNATCHED_PROPER])
-                status_download = '(%s)' % ','.join([str(quality) for quality in Quality.DOWNLOADED + Quality.ARCHIVED])
-
-                sql_statement = 'SELECT ' \
-                + '(SELECT COUNT(*) FROM tv_episodes WHERE season > 0 AND episode > 0 AND airdate > 1 AND status IN %s) AS ep_snatched, ' % status_quality \
-                + '(SELECT COUNT(*) FROM tv_episodes WHERE season > 0 AND episode > 0 AND airdate > 1 AND status IN %s) AS ep_downloaded, ' % status_download \
-                + '(SELECT COUNT(*) FROM tv_episodes WHERE season > 0 AND episode > 0 AND airdate > 1 AND ((airdate <= %s AND (status = %s OR status = %s)) ' % (today, str(SKIPPED), str(WANTED)) \
-                + ' OR (status IN %s) OR (status IN %s))) AS ep_total FROM tv_episodes tv_eps LIMIT 1' % (status_quality, status_download)
-
-                sql_result = myDB.select(sql_statement)
-
-                shows_total = len(sickbeard.showList)
-                shows_active = len([show for show in sickbeard.showList if show.paused == 0 and show.status == "Continuing"])
-
-                if sql_result:
-                    ep_snatched = sql_result[0]['ep_snatched']
-                    ep_downloaded = sql_result[0]['ep_downloaded']
-                    ep_total = sql_result[0]['ep_total']
-                else:
-                    ep_snatched = 0
-                    ep_downloaded = 0
-                    ep_total = 0
-
+                stats = Show.overall_stats()
+                ep_downloaded = stats['episodes']['downloaded']
+                ep_snatched = stats['episodes']['snatched']
+                ep_total = stats['episodes']['total']
                 ep_percentage = '' if ep_total == 0 else '(<span class="footerhighlight">%s%%</span>)' % re.sub(r'(\d+)(\.\d)\d+', r'\1\2', str((float(ep_downloaded)/float(ep_total))*100))
-
-                try:
-                    localRoot = srRoot
-                except NotFound:
-                    localRoot = ''
-
-                try:
-                    localheader = header
-                except NotFound:
-                    localheader = ''
             %>
-                <span class="footerhighlight">${shows_total}</span> Shows (<span class="footerhighlight">${shows_active}</span> Active)
+                <span class="footerhighlight">${stats['shows']['total']}</span> Shows (<span class="footerhighlight">${stats['shows']['active']}</span> Active)
                 | <span class="footerhighlight">${ep_downloaded}</span>
 
                 % if ep_snatched:
-                <span class="footerhighlight"><a href="${localRoot}/manage/episodeStatuses?whichStatus=2" title="View overview of snatched episodes">+${ep_snatched}</a></span> Snatched
+                <span class="footerhighlight"><a href="${srRoot}/manage/episodeStatuses?whichStatus=2" title="View overview of snatched episodes">+${ep_snatched}</a></span> Snatched
                 % endif
 
-                        &nbsp;/&nbsp;<span class="footerhighlight">${ep_total}</span> Episodes Downloaded ${ep_percentage}
+                &nbsp;/&nbsp;<span class="footerhighlight">${ep_total}</span> Episodes Downloaded ${ep_percentage}
                 | Daily Search: <span class="footerhighlight">${str(sickbeard.dailySearchScheduler.timeLeft()).split('.')[0]}</span>
                 | Backlog Search: <span class="footerhighlight">${str(sickbeard.backlogSearchScheduler.timeLeft()).split('.')[0]}</span>
 
@@ -346,6 +316,7 @@
         <script type="text/javascript" src="${srRoot}/js/lib/jquery.cookiejar.js?${sbPID}"></script>
         <script type="text/javascript" src="${srRoot}/js/lib/jquery.json-2.2.min.js?${sbPID}"></script>
         <script type="text/javascript" src="${srRoot}/js/lib/jquery.selectboxes.min.js?${sbPID}"></script>
+        <script type="text/javascript" src="${srRoot}/js/lib/jquery.tokeninput.js?${sbPID}"></script>
         <script type="text/javascript" src="${srRoot}/js/lib/jquery.tablesorter-2.17.7.min.js?${sbPID}"></script><!-- Can't be added to bower -->
         <script type="text/javascript" src="${srRoot}/js/lib/jquery.tablesorter.widgets-2.17.7.min.js?${sbPID}"></script><!-- Can't be added to bower -->
         <script type="text/javascript" src="${srRoot}/js/lib/jquery.tablesorter.widget-columnSelector-2.17.7.js?${sbPID}"></script><!-- Can't be added to bower -->

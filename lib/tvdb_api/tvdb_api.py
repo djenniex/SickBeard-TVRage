@@ -585,8 +585,8 @@ class Tvdb:
             raise tvdb_error("Connection error " + str(e.message) + " while loading URL " + str(url))
         except requests.exceptions.Timeout, e:
             raise tvdb_error("Connection timed out " + str(e.message) + " while loading URL " + str(url))
-        except Exception:
-            raise tvdb_error("Unknown exception while loading URL " + url + ": " + traceback.format_exc())
+        except Exception as e:
+            raise tvdb_error("Unknown exception while loading URL " + url + ": " + repr(e))
 
         def process(path, key, value):
             key = key.lower()
@@ -622,7 +622,7 @@ class Tvdb:
                 raise tvdb_error("Bad zip file received from thetvdb.com, could not read it")
         else:
             try:
-                return xmltodict.parse(resp.text, postprocessor=process)
+                return xmltodict.parse(resp.content.decode('utf-8'), postprocessor=process)
             except:
                 return dict([(u'data', None)])
 

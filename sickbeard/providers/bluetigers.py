@@ -2,7 +2,7 @@
 # Author: raver2046 <raver2046@gmail.com>
 # URL: http://code.google.com/p/sickbeard/
 #
-# This file is part of SickRage. 
+# This file is part of SickRage.
 #
 # Sick Beard is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -19,20 +19,14 @@
 
 import traceback
 import re
-import datetime
+
 from requests.auth import AuthBase
-import sickbeard
-import generic
+from sickbeard.providers import generic
 import requests
 from sickbeard.bs4_parser import BS4Parser
-from sickbeard.common import Quality
+
 from sickbeard import logger
 from sickbeard import tvcache
-from sickbeard import show_name_helpers
-from sickbeard import db
-from sickbeard import helpers
-from sickbeard import classes
-from sickbeard.helpers import sanitizeSceneName
 
 
 class BLUETIGERSProvider(generic.TorrentProvider):
@@ -40,8 +34,7 @@ class BLUETIGERSProvider(generic.TorrentProvider):
         generic.TorrentProvider.__init__(self, "BLUETIGERS")
 
         self.supportsBacklog = True
-        self.public = False
-        self.enabled = False
+
         self.username = None
         self.password = None
         self.ratio = None
@@ -63,9 +56,6 @@ class BLUETIGERSProvider(generic.TorrentProvider):
 
         self.url = self.urls['base_url']
 
-    def isEnabled(self):
-        return self.enabled
-
     def _doLogin(self):
         if any(requests.utils.dict_from_cookiejar(self.session.cookies).values()):
             return True
@@ -76,7 +66,7 @@ class BLUETIGERSProvider(generic.TorrentProvider):
             'take_login' : '1'
             }
 
-        response = self.getURL(self.urls['login'],  post_data=login_params, timeout=30)
+        response = self.getURL(self.urls['login'], post_data=login_params, timeout=30)
         if not response:
             logger.log(u"Unable to connect to provider", logger.WARNING)
             return False
@@ -93,14 +83,18 @@ class BLUETIGERSProvider(generic.TorrentProvider):
 
         results = []
         items = {'Season': [], 'Episode': [], 'RSS': []}
+        
+        # check for auth
+        if not self._doLogin():
+            return results
 
         for mode in search_strings.keys():
             logger.log(u"Search Mode: %s" % mode, logger.DEBUG)
             for search_string in search_strings[mode]:
 
-                if mode != 'RSS':
+                if mode is not 'RSS':
                     logger.log(u"Search string: %s " % search_string, logger.DEBUG)
-  
+
                 self.search_params['search'] = search_string
 
                 data = self.getURL(self.urls['search'], params=self.search_params)
@@ -109,7 +103,7 @@ class BLUETIGERSProvider(generic.TorrentProvider):
 
                 try:
                     with BS4Parser(data, features=["html5lib", "permissive"]) as html:
-                        result_linkz = html.findAll('a',  href=re.compile("torrents-details"))
+                        result_linkz = html.findAll('a', href=re.compile("torrents-details"))
 
                         if not result_linkz:
                             logger.log(u"Data returned from provider do not contains any torrent", logger.DEBUG)
@@ -118,24 +112,24 @@ class BLUETIGERSProvider(generic.TorrentProvider):
                         if result_linkz:
                             for link in result_linkz:
                                 title = link.text
-                                download_url =   self.urls['base_url']  + "/" + link['href']
-                                download_url = download_url.replace("torrents-details","download")
-                                #FIXME
+                                download_url = self.urls['base_url'] + "/" + link['href']
+                                download_url = download_url.replace("torrents-details", "download")
+                                # FIXME
                                 size = -1
                                 seeders = 1
                                 leechers = 0
 
                                 if not title or not download_url:
-                                   continue
+                                    continue
 
-                                #Filter unseeded torrent
-                                #if seeders < self.minseed or leechers < self.minleech:
-                                #    if mode != 'RSS':
+                                # Filter unseeded torrent
+                                # if seeders < self.minseed or leechers < self.minleech:
+                                #    if mode is not 'RSS':
                                 #        logger.log(u"Discarding torrent because it doesn't meet the minimum seeders or leechers: {0} (S:{1} L:{2})".format(title, seeders, leechers), logger.DEBUG)
                                 #    continue
 
                                 item = title, download_url, size, seeders, leechers
-                                if mode != 'RSS':
+                                if mode is not 'RSS':
                                     logger.log(u"Found result: %s " % title, logger.DEBUG)
 
                                 items[mode].append(item)
@@ -143,38 +137,10 @@ class BLUETIGERSProvider(generic.TorrentProvider):
                 except Exception, e:
                     logger.log(u"Failed parsing provider. Traceback: %s" % traceback.format_exc(), logger.ERROR)
 
-            #For each search mode sort all the items by seeders if available
+            # For each search mode sort all the items by seeders if available
             items[mode].sort(key=lambda tup: tup[3], reverse=True)
 
             results += items[mode]
-
-        return results
-
-    def findPropers(self, search_date=datetime.datetime.today()):
-
-        results = []
-
-        myDB = db.DBConnection()
-        sqlResults = myDB.select(
-            'SELECT s.show_name, e.showid, e.season, e.episode, e.status, e.airdate FROM tv_episodes AS e' +
-            ' INNER JOIN tv_shows AS s ON (e.showid = s.indexer_id)' +
-            ' WHERE e.airdate >= ' + str(search_date.toordinal()) +
-            ' AND (e.status IN (' + ','.join([str(x) for x in Quality.DOWNLOADED]) + ')' +
-            ' OR (e.status IN (' + ','.join([str(x) for x in Quality.SNATCHED]) + ')))'
-        )
-
-        if not sqlResults:
-            return []
-
-        for sqlshow in sqlResults:
-            self.show = helpers.findCertainShow(sickbeard.showList, int(sqlshow["showid"]))
-            if self.show:
-                curEp = self.show.getEpisode(int(sqlshow["season"]), int(sqlshow["episode"]))
-                searchString = self._get_episode_search_strings(curEp, add_string='PROPER|REPACK')
-
-                for item in self._doSearch(searchString[0]):
-                    title, url = self._get_title_and_url(item)
-                    results.append(classes.Proper(title, url, datetime.datetime.today(), self.show))
 
         return results
 
@@ -193,8 +159,8 @@ class BLUETIGERSAuth(AuthBase):
 
 
 class BLUETIGERSCache(tvcache.TVCache):
-    def __init__(self, provider):
-        tvcache.TVCache.__init__(self, provider)
+    def __init__(self, provider_obj):
+        tvcache.TVCache.__init__(self, provider_obj)
 
         # Only poll BLUETIGERS every 10 minutes max
         self.minTime = 10

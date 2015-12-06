@@ -17,16 +17,10 @@
 # You should have received a copy of the GNU General Public License
 # along with SickRage.  If not, see <http://www.gnu.org/licenses/>.
 
-import datetime
 from urllib import quote_plus
 
-import sickbeard
 from sickbeard import logger
 from sickbeard import tvcache
-from sickbeard import helpers
-from sickbeard import db
-from sickbeard import classes
-from sickbeard.common import Quality
 from sickbeard.providers import generic
 
 class BitCannonProvider(generic.TorrentProvider):
@@ -37,7 +31,6 @@ class BitCannonProvider(generic.TorrentProvider):
         self.supportsBacklog = True
         self.public = True
 
-        self.enabled = False
         self.minseed = None
         self.minleech = None
         self.ratio = 0
@@ -50,9 +43,6 @@ class BitCannonProvider(generic.TorrentProvider):
             'search': self.url + 'search/',
             'trackers': self.url + 'stats',
         }
-
-    def isEnabled(self):
-        return self.enabled
 
     def _doSearch(self, search_strings, search_mode='eponly', epcount=0, age=0, epObj=None):
         results = []
@@ -83,52 +73,25 @@ class BitCannonProvider(generic.TorrentProvider):
                     leechers = swarm.get(u'Leechers', 0)
                     size = item.get(u'Size', -1)
 
-                    #Filter unseeded torrent
+                    # Filter unseeded torrent
                     if seeders < self.minseed or leechers < self.minleech:
-                        if mode != 'RSS':
+                        if mode is not 'RSS':
                             logger.log(u"Discarding torrent because it doesn't meet the minimum seeders or leechers: {0} (S:{1} L:{2})".format(title, seeders, leechers), logger.DEBUG)
                         continue
 
                     # Only build the url if we selected it
-                    download_url = u'magnet:?xt=urn:btih:%s&dn=%s&tr=%s' % (info_hash, quote_plus(title.encode('utf-8')).decode('utf-8'), u'&tr='.join([quote_plus(x.encode('utf-8')).decode('utf-8') for x in trackers]))
+                    download_url = 'magnet:?xt=urn:btih:%s&dn=%s&tr=%s' % (info_hash, quote_plus(title.encode('utf-8')), u'&tr='.join([quote_plus(x.encode('utf-8')) for x in trackers]))
 
                     item = title, download_url, size, seeders, leechers
-                    if mode != 'RSS':
+                    if mode is not 'RSS':
                         logger.log(u"Found result: %s " % title, logger.DEBUG)
 
                     items[mode].append(item)
 
-            #For each search mode sort all the items by seeders if available
+            # For each search mode sort all the items by seeders if available
             items[mode].sort(key=lambda tup: tup[3], reverse=True)
 
             results += items[mode]
-
-        return results
-
-    def findPropers(self, search_date=datetime.datetime.today()-datetime.timedelta(days=1)):
-        results = []
-
-        myDB = db.DBConnection()
-        sqlResults = myDB.select(
-            'SELECT s.show_name, e.showid, e.season, e.episode, e.status, e.airdate, s.indexer FROM tv_episodes AS e' +
-            ' INNER JOIN tv_shows AS s ON (e.showid = s.indexer_id)' +
-            ' WHERE e.airdate >= ' + str(search_date.toordinal()) +
-            ' AND (e.status IN (' + ','.join([str(x) for x in Quality.DOWNLOADED]) + ')' +
-            ' OR (e.status IN (' + ','.join([str(x) for x in Quality.SNATCHED]) + ')))'
-        )
-
-        for sqlshow in sqlResults or []:
-            show = helpers.findCertainShow(sickbeard.showList, int(sqlshow["showid"]))
-            if show:
-                curEp = show.getEpisode(int(sqlshow["season"]), int(sqlshow["episode"]))
-
-                searchStrings = self._get_episode_search_strings(curEp, add_string='PROPER|REPACK')
-
-                for item in self._doSearch(searchStrings[0]):
-                    title, url = self._get_title_and_url(item)
-                    pubdate = item[6]
-
-                    results.append(classes.Proper(title, url, pubdate, show))
 
         return results
 
@@ -146,7 +109,7 @@ class BitCannonCache(tvcache.TVCache):
 
     def _getRSSData(self):
         return {'entries': []}
-        #search_params = {'RSS': ['']}
-        #return {'entries': self.provider._doSearch(search_params)}
+        # search_strings = {'RSS': ['']}
+        # return {'entries': self.provider._doSearch(search_strings)}
 
 provider = BitCannonProvider()

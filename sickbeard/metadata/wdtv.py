@@ -1,3 +1,5 @@
+# coding=utf-8
+
 # Author: Nic Wolfe <nic@wolfeden.ca>
 # URL: http://code.google.com/p/sickbeard/
 #
@@ -22,7 +24,7 @@ import re
 
 import sickbeard
 
-import generic
+from sickbeard.metadata import generic
 
 from sickbeard import logger, helpers
 from sickrage.helper.common import dateFormat
@@ -93,9 +95,9 @@ class WDTVMetadata(generic.GenericMetadata):
     # Override with empty methods for unsupported features
     def retrieveShowMetadata(self, folder):
         # no show metadata generated, we abort this lookup function
-        return (None, None, None)
+        return None, None, None
 
-    def create_show_metadata(self, show_obj, force=False):
+    def create_show_metadata(self, show_obj):
         pass
 
     def update_show_indexer_metadata(self, show_obj):
@@ -119,21 +121,23 @@ class WDTVMetadata(generic.GenericMetadata):
     def create_season_all_banner(self, show_obj):
         pass
 
-    def get_episode_thumb_path(self, ep_obj):
+    @staticmethod
+    def get_episode_thumb_path(ep_obj):
         """
         Returns the path where the episode thumbnail should be stored. Defaults to
         the same path as the episode file but with a .metathumb extension.
 
         ep_obj: a TVEpisode instance for which to create the thumbnail
         """
-        if ek(os.path.isfile, ep_obj.location):
+        if ek(os.path.isfile,ep_obj.location):
             tbn_filename = helpers.replaceExtension(ep_obj.location, 'metathumb')
         else:
             return None
 
         return tbn_filename
 
-    def get_season_poster_path(self, show_obj, season):
+    @staticmethod
+    def get_season_poster_path(show_obj, season):
         """
         Season thumbs for WDTV go in Show Dir/Season X/folder.jpg
 
@@ -141,9 +145,9 @@ class WDTVMetadata(generic.GenericMetadata):
         """
 
         dir_list = [x for x in ek(os.listdir, show_obj.location) if
-                    ek(os.path.isdir, ek(os.path.join, show_obj.location, x))]
+                    ek(os.path.isdir,ek(os.path.join, show_obj.location, x))]
 
-        season_dir_regex = '^Season\s+(\d+)$'
+        season_dir_regex = r'^Season\s+(\d+)$'
 
         season_dir = None
 
@@ -210,15 +214,14 @@ class WDTVMetadata(generic.GenericMetadata):
             try:
                 myEp = myShow[curEpToWrite.season][curEpToWrite.episode]
             except (sickbeard.indexer_episodenotfound, sickbeard.indexer_seasonnotfound):
-                logger.log(u"Unable to find episode " + str(curEpToWrite.season) + "x" + str(
-                    curEpToWrite.episode) + " on " + sickbeard.indexerApi(
-                    ep_obj.show.indexer).name + "... has it been removed? Should I delete from db?")
+                logger.log(u"Unable to find episode %dx%d on %s... has it been removed? Should I delete from db?" %
+                           (curEpToWrite.season, curEpToWrite.episode, sickbeard.indexerApi(ep_obj.show.indexer).name))
                 return None
 
-            if getattr(myEp, 'firstaired', None) is None and ep_obj.season == 0:
+            if ep_obj.season == 0 and not getattr(myEp, 'firstaired', None):
                 myEp["firstaired"] = str(datetime.date.fromordinal(1))
 
-            if getattr(myEp, 'episodename', None) is None or getattr(myEp, 'firstaired', None) is None:
+            if not (getattr(myEp, 'episodename', None) and getattr(myEp, 'firstaired', None)):
                 return None
 
             if len(eps_to_write) > 1:
@@ -233,12 +236,12 @@ class WDTVMetadata(generic.GenericMetadata):
             title = etree.SubElement(episode, "title")
             title.text = ep_obj.prettyName()
 
-            seriesName = etree.SubElement(episode, "series_name")
-            if getattr(myShow, 'seriesname', None) is not None:
+            if getattr(myShow, 'seriesname', None):
+                seriesName = etree.SubElement(episode, "series_name")
                 seriesName.text = myShow["seriesname"]
 
-            episodeName = etree.SubElement(episode, "episode_name")
-            if curEpToWrite.name != None:
+            if curEpToWrite.name:
+                episodeName = etree.SubElement(episode, "episode_name")
                 episodeName.text = curEpToWrite.name
 
             seasonNumber = etree.SubElement(episode, "season_number")
@@ -252,43 +255,43 @@ class WDTVMetadata(generic.GenericMetadata):
             if curEpToWrite.airdate != datetime.date.fromordinal(1):
                 firstAired.text = str(curEpToWrite.airdate)
 
-            year = etree.SubElement(episode, "year")
-            if getattr(myShow, 'firstaired', None) is not None:
+            if getattr(myShow, 'firstaired', None):
                 try:
                     year_text = str(datetime.datetime.strptime(myShow["firstaired"], dateFormat).year)
                     if year_text:
+                        year = etree.SubElement(episode, "year")
                         year.text = year_text
-                except:
+                except Exception:
                     pass
 
-            runtime = etree.SubElement(episode, "runtime")
-            if curEpToWrite.season != 0:
-                if getattr(myShow, 'runtime', None) is not None:
-                    runtime.text = myShow["runtime"]
+            if curEpToWrite.season != 0 and getattr(myShow, 'runtime', None):
+                runtime = etree.SubElement(episode, "runtime")
+                runtime.text = myShow["runtime"]
 
-            genre = etree.SubElement(episode, "genre")
-            if getattr(myShow, 'genre', None) is not None:
-                genre.text = " / ".join([x for x in myShow["genre"].split('|') if x])
+            if getattr(myShow, 'genre', None):
+                genre = etree.SubElement(episode, "genre")
+                genre.text = " / ".join([x.strip() for x in myShow["genre"].split('|') if x.strip()])
 
-            director = etree.SubElement(episode, "director")
-            director_text = getattr(myEp, 'director', None)
-            if director_text is not None:
-                director.text = director_text
+            if getattr(myEp, 'director', None):
+                director = etree.SubElement(episode, "director")
+                director.text = myEp['director']
 
-            if getattr(myShow, '_actors', None) is not None:
+            if getattr(myShow, '_actors', None):
                 for actor in myShow['_actors']:
+                    if not ('name' in actor and actor['name'].strip()):
+                        continue
+
                     cur_actor = etree.SubElement(episode, "actor")
 
                     cur_actor_name = etree.SubElement(cur_actor, "name")
-                    if getattr(actor, 'name', None):
-                        cur_actor_name.text = actor['name']
+                    cur_actor_name.text = actor['name']
 
-                    cur_actor_role = etree.SubElement(cur_actor, "role")
-                    if getattr(actor, 'role', None):
-                        cur_actor_role.text = actor['role']
+                    if 'role' in actor and actor['role'].strip():
+                        cur_actor_role = etree.SubElement(cur_actor, "role")
+                        cur_actor_role.text = actor['role'].strip()
 
-            overview = etree.SubElement(episode, "overview")
-            if curEpToWrite.description != None:
+            if curEpToWrite.description:
+                overview = etree.SubElement(episode, "overview")
                 overview.text = curEpToWrite.description
 
             # Make it purdy

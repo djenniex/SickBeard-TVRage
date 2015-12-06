@@ -20,7 +20,7 @@ import traceback
 
 import sickbeard
 from sickbeard import logger
-from .generic import GenericClient
+from sickbeard.clients.generic import GenericClient
 from rtorrent import RTorrent
 
 
@@ -52,7 +52,6 @@ class rTorrentAPI(GenericClient):
         return self.auth
 
     def _add_torrent_uri(self, result):
-        filedata = None
 
         if not self.auth:
             return False
@@ -72,7 +71,7 @@ class rTorrentAPI(GenericClient):
             if result.show.is_anime:
                 label = sickbeard.TORRENT_LABEL_ANIME
             if label:
-                torrent.set_custom(1, label.lower())
+                torrent.set_custom(1, label)
 
             if sickbeard.TORRENT_PATH:
                 torrent.set_directory(sickbeard.TORRENT_PATH)
@@ -82,12 +81,11 @@ class rTorrentAPI(GenericClient):
 
             return True
 
-        except Exception as e:
+        except Exception:
             logger.log(traceback.format_exc(), logger.DEBUG)
             return False
 
     def _add_torrent_file(self, result):
-        filedata = None
 
         if not self.auth:
             return False
@@ -112,7 +110,7 @@ class rTorrentAPI(GenericClient):
             if result.show.is_anime:
                 label = sickbeard.TORRENT_LABEL_ANIME
             if label:
-                torrent.set_custom(1, label.lower())
+                torrent.set_custom(1, label)
 
             if sickbeard.TORRENT_PATH:
                 torrent.set_directory(sickbeard.TORRENT_PATH)
@@ -125,7 +123,7 @@ class rTorrentAPI(GenericClient):
 
             return True
 
-        except Exception as e:
+        except Exception:
             logger.log(traceback.format_exc(), logger.DEBUG)
             return False
 
