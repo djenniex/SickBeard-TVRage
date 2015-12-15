@@ -1,6 +1,7 @@
-# coding=UTF-8
-# Author: Dennis Lutter <lad1337@gmail.com>
-# URL: http://code.google.com/p/sickbeard/
+#!/usr/bin/env python2
+# -*- coding: utf-8 -*-
+# Author: echel0n <sickrage.tv@gmail.com>
+# URL: http://www.github.com/sickragetv/sickrage/
 #
 # This file is part of SickRage.
 #
@@ -17,25 +18,39 @@
 # You should have received a copy of the GNU General Public License
 # along with SickRage.  If not, see <http://www.gnu.org/licenses/>.
 
-import sys, os.path
+from __future__ import unicode_literals
+
+import os.path
+import sys
+
 sys.path.insert(1, os.path.abspath(os.path.join(os.path.dirname(__file__), '../lib')))
 sys.path.insert(1, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 import unittest
-import test_lib as test
 
-class DBBasicTests(test.SiCKRAGETestDBCase):
-    def setUp(self):
-        super(DBBasicTests, self).setUp()
-        self.db = test.db.DBConnection()
+from tests import SiCKRAGETestCase, SiCKRAGETestDBCase
 
-    def test_select(self):
-        self.db.select("SELECT * FROM tv_episodes WHERE showid = ? AND location != ''", [0000])
+import logging
+from sickrage.helper.exceptions import ex
 
-if __name__ == '__main__':
+
+def error():
+    try:
+        raise Exception('FAKE EXCEPTION')
+    except Exception as e:
+        logging.error("FAKE ERROR: {}".format(ex(e)))
+        logging.submit_errors()
+        raise
+
+
+class IssueSubmitterBasicTests(SiCKRAGETestCase):
+    def test_submitter(self):
+        self.assertRaises(Exception, error)
+
+
+if __name__ == "__main__":
     print "=================="
-    print "STARTING - DB TESTS"
+    print "STARTING - ISSUE SUBMITTER TESTS"
     print "=================="
     print "######################################################################"
-    suite = unittest.TestLoader().loadTestsFromTestCase(DBBasicTests)
-    unittest.TextTestRunner(verbosity=2).run(suite)
+    unittest.main()
