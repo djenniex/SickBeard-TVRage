@@ -1,4 +1,4 @@
-#!/usr/bin/env python2.7
+#!/usr/bin/env python2
 # -*- coding: utf-8 -*-
 # Author: Nic Wolfe <nic@wolfeden.ca>
 # URL: http://code.google.com/p/sickbeard/
@@ -27,12 +27,15 @@ import re
 import shutil
 import socket
 import sys
+import threading
 import webbrowser
 import logging
 import requests
 from threading import Lock
 from configobj import ConfigObj
 from github import Github
+
+import network_timezones
 from sickbeard.logger import SRLogger
 from sickbeard import dailysearcher
 from sickbeard import db
@@ -49,7 +52,7 @@ from sickbeard.common import SD
 from sickbeard.common import SKIPPED
 from sickbeard.common import WANTED
 from sickbeard.config import CheckSection, check_setting_int, check_setting_str, check_setting_float, ConfigMigrator, \
-    naming_ep_type, censoredItems
+    naming_ep_type
 from sickbeard.databases import mainDB, cache_db, failed_db
 from sickbeard.indexers import indexer_api
 from sickbeard.indexers.indexer_exceptions import indexer_shownotfound, indexer_showincomplete, indexer_exception, \
@@ -78,15 +81,17 @@ ENCRYPTION_VERSION = 0
 ENCRYPTION_SECRET = None
 
 PROG_DIR = '.'
+DATA_DIR = ''
+GUI_DIR = ''
 MY_FULLNAME = None
 MY_NAME = None
 MY_ARGS = []
-SYS_ENCODING = ''
-DATA_DIR = ''
+SYS_ENCODING = None
 CREATEPID = False
 PIDFILE = ''
 
 DAEMON = None
+DAEMONIZE = False
 NO_RESIZE = False
 
 # system events
@@ -144,12 +149,11 @@ NEWS_UNREAD = 0
 INIT_LOCK = Lock()
 started = False
 
-LOGGER = None
 ACTUAL_LOG_DIR = None
 LOG_DIR = None
-LOG_NR = 5
-LOG_SIZE = 1048576
-LOG_FILE = None
+SRLogger.logNr = LOG_NR = 5
+SRLogger.logSize = LOG_SIZE = 1048576
+SRLogger.logFile = LOG_FILE = None
 
 SOCKET_TIMEOUT = None
 
@@ -614,13 +618,13 @@ def initialize(consoleLogging=True):
             USE_EMAIL, EMAIL_HOST, EMAIL_PORT, EMAIL_TLS, EMAIL_USER, EMAIL_PASSWORD, EMAIL_FROM, EMAIL_NOTIFY_ONSNATCH, EMAIL_NOTIFY_ONDOWNLOAD, EMAIL_NOTIFY_ONSUBTITLEDOWNLOAD, EMAIL_LIST, \
             USE_LISTVIEW, METADATA_KODI, METADATA_KODI_12PLUS, METADATA_MEDIABROWSER, METADATA_PS3, metadata_provider_dict, \
             NEWZBIN, NEWZBIN_USERNAME, NEWZBIN_PASSWORD, GIT_PATH, MOVE_ASSOCIATED_FILES, SYNC_FILES, POSTPONE_IF_SYNC_FILES, dailySearchScheduler, NFO_RENAME, \
-            GUI_NAME, HOME_LAYOUT, HISTORY_LAYOUT, DISPLAY_SHOW_SPECIALS, COMING_EPS_LAYOUT, COMING_EPS_SORT, COMING_EPS_DISPLAY_PAUSED, COMING_EPS_MISSED_RANGE, FUZZY_DATING, TRIM_ZERO, DATE_PRESET, TIME_PRESET, TIME_PRESET_W_SECONDS, THEME_NAME, FILTER_ROW, \
+            GUI_NAME, GUI_DIR, HOME_LAYOUT, HISTORY_LAYOUT, DISPLAY_SHOW_SPECIALS, COMING_EPS_LAYOUT, COMING_EPS_SORT, COMING_EPS_DISPLAY_PAUSED, COMING_EPS_MISSED_RANGE, FUZZY_DATING, TRIM_ZERO, DATE_PRESET, TIME_PRESET, TIME_PRESET_W_SECONDS, THEME_NAME, FILTER_ROW, \
             POSTER_SORTBY, POSTER_SORTDIR, HISTORY_LIMIT, CREATE_MISSING_SHOW_DIRS, ADD_SHOWS_WO_DIR, WEB_SERVER, \
             METADATA_WDTV, METADATA_TIVO, METADATA_MEDE8ER, IGNORE_WORDS, IGNORED_SUBS_LIST, REQUIRE_WORDS, CALENDAR_UNPROTECTED, CALENDAR_ICONS, NO_RESTART, \
             USE_SUBTITLES, SUBTITLES_LANGUAGES, SUBTITLES_DIR, SUBTITLES_SERVICES_LIST, SUBTITLES_SERVICES_ENABLED, SUBTITLES_HISTORY, SUBTITLES_FINDER_FREQUENCY, SUBTITLES_MULTI, EMBEDDED_SUBTITLES_ALL, SUBTITLES_EXTRA_SCRIPTS, subtitlesFinderScheduler, \
             SUBTITLES_HEARING_IMPAIRED, ADDIC7ED_USER, ADDIC7ED_PASS, LEGENDASTV_USER, LEGENDASTV_PASS, OPENSUBTITLES_USER, OPENSUBTITLES_PASS, \
             USE_FAILED_DOWNLOADS, DELETE_FAILED, ANON_REDIRECT, LOCALHOST_IP, DEBUG, DEFAULT_PAGE, PROXY_SETTING, PROXY_INDEXERS, \
-            AUTOPOSTPROCESSER_FREQUENCY, SHOWUPDATE_HOUR, LOG_FILE, LOGGER, censoredItems, \
+            AUTOPOSTPROCESSER_FREQUENCY, SHOWUPDATE_HOUR, LOG_FILE, \
             ANIME_DEFAULT, NAMING_ANIME, ANIMESUPPORT, USE_ANIDB, ANIDB_USERNAME, ANIDB_PASSWORD, ANIDB_USE_MYLIST, \
             ANIME_SPLIT_HOME, SCENE_DEFAULT, ARCHIVE_DEFAULT, DOWNLOAD_URL, BACKLOG_DAYS, GIT_USERNAME, GIT_PASSWORD, \
             GIT_AUTOISSUES, DEVELOPER, gh, DISPLAY_ALL_SEASONS, SSL_VERIFY, NEWS_LAST_READ, NEWS_LATEST, SOCKET_TIMEOUT
@@ -652,28 +656,20 @@ def initialize(consoleLogging=True):
         CheckSection(CFG, 'Subtitles')
         CheckSection(CFG, 'pyTivo')
 
-        # debugging
-        DEBUG = bool(check_setting_int(CFG, 'General', 'debug', 0))
         ACTUAL_LOG_DIR = check_setting_str(CFG, 'General', 'log_dir', 'Logs')
         LOG_DIR = ek(os.path.normpath, ek(os.path.join, DATA_DIR, ACTUAL_LOG_DIR))
-        LOG_NR = check_setting_int(CFG, 'General', 'log_nr', 5)  # Default to 5 backup file (sickrage.log.x)
-        LOG_SIZE = check_setting_int(CFG, 'General', 'log_size', 1048576)  # Default to max 1MB per logfile
-        LOG_FILE = check_setting_str(CFG, 'General', 'log_file', ek(os.path.join, LOG_DIR, 'sickrage.log'))
-        fileLogging = True
+        SRLogger.logNr = LOG_NR = check_setting_int(CFG, 'General', 'log_nr', 5)  # Default to 5 backup file (sickrage.log.x)
+        SRLogger.logSize = LOG_SIZE = check_setting_int(CFG, 'General', 'log_size', 1048576)  # Default to max 1MB per logfile
+        SRLogger.logFile = LOG_FILE = check_setting_str(CFG, 'General', 'log_file', ek(os.path.join, LOG_DIR, 'sickrage.log'))
+        SRLogger.debugLogging = DEBUG = bool(check_setting_int(CFG, 'General', 'debug', 0))
+        SRLogger.consoleLogging = consoleLogging
+        SRLogger.fileLogging = True
         if not helpers.makeDir(LOG_DIR):
             sys.stderr.write("!!! No log folder, logging to screen only!\n")
-            fileLogging = False
+            SRLogger.fileLogging = False
 
-        # initalize logger
-        SRLogger(
-                logFile=LOG_FILE,
-                consoleLogging=consoleLogging,
-                fileLogging=fileLogging,
-                debugLogging=DEBUG,
-                logSize=LOG_SIZE,
-                logNr=LOG_NR,
-                censoredItems=censoredItems
-        )
+        # initalize logging settings
+        SRLogger.initalize()
 
         # Need to be before any passwords
         ENCRYPTION_VERSION = check_setting_int(CFG, 'General', 'encryption_version', 0)
@@ -778,6 +774,7 @@ def initialize(consoleLogging=True):
                         logging.warning("Restore: Unable to remove the cache/{0} directory: {1}".format(cleanupDir, ex(e)))
 
         GUI_NAME = check_setting_str(CFG, 'GUI', 'gui_name', 'slick')
+        GUI_DIR = ek(os.path.join, PROG_DIR, 'gui', GUI_NAME)
 
         THEME_NAME = check_setting_str(CFG, 'GUI', 'theme_name', 'dark')
 
@@ -1493,6 +1490,10 @@ def start():
         if __INITIALIZED__:
             # start sysetm events queue
             events.start()
+
+            # Prepopulate network timezones, it isn't thread safe
+            networkTimezones = threading.Thread(target=network_timezones.update_network_dict, name="TZUPDATER")
+            networkTimezones.start()
 
             # start the daily search scheduler
             dailySearchScheduler.enable = True

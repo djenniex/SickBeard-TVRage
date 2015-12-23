@@ -28,13 +28,8 @@ import time
 import urllib
 import datetime
 import traceback
-import copy
-import functools
-
-from tornado.ioloop import IOLoop
 
 import sickbeard
-from concurrent.futures import ThreadPoolExecutor
 from sickrage.helper.common import dateFormat, dateTimeFormat, timeFormat
 from sickrage.helper.encoding import ek
 from sickrage.helper.exceptions import CantUpdateShowException, ex, ShowDirectoryNotFoundException
@@ -49,7 +44,7 @@ from sickrage.show.Show import Show
 from sickrage.system.Restart import Restart
 from sickrage.system.Shutdown import Shutdown
 from sickbeard.versionChecker import CheckVersion
-from sickbeard import db, logger, ui, helpers
+from sickbeard import db, ui, helpers
 from sickbeard import search_queue
 from sickbeard import image_cache
 from sickbeard import classes
@@ -68,13 +63,14 @@ from sickbeard.common import UNKNOWN
 from sickbeard.common import WANTED
 from sickbeard.common import ARCHIVED
 from sickbeard.common import statusStrings
+from sickbeard.logger import SRLogger
 
-from tornado.web import RequestHandler
+from tornado.web import RequestHandler, asynchronous
 from tornado.escape import json_encode
-
-from tornado.gen import coroutine
-
+from tornado.ioloop import IOLoop
+from tornado.gen import coroutine, Task
 from tornado.concurrent import run_on_executor
+from concurrent.futures import ThreadPoolExecutor
 
 indexer_ids = ["indexerid", "tvdbid"]
 
@@ -93,23 +89,40 @@ result_type_map = {
     RESULT_DENIED: "denied",
 }
 
+class KeyHandler(RequestHandler):
+    def __init__(self, *args, **kwargs):
+        super(KeyHandler, self).__init__(*args, **kwargs)
+
+    def prepare(self, *args, **kwargs):
+        api_key = None
+
+        try:
+            username = sickbeard.WEB_USERNAME
+            password = sickbeard.WEB_PASSWORD
+
+            if (self.get_argument('u', None) == username or not username) and \
+                    (self.get_argument('p', None) == password or not password):
+                api_key = sickbeard.API_KEY
+
+            self.finish({'success': api_key is not None, 'api_key': api_key})
+        except Exception:
+            logging.error('Failed doing key request: %s' % (traceback.format_exc()))
+            self.finish({'success': False, 'error': 'Failed returning results'})
 
 # basically everything except RESULT_SUCCESS / success is bad
 class ApiHandler(RequestHandler):
     """ api class that returns json results """
     version = 5  # use an int since float-point is unpredictable
-    executor = ThreadPoolExecutor(50)
 
     def __init__(self, application, request, *args, **kwargs):
         super(ApiHandler, self).__init__(application, request)
-        self.io_loop = IOLoop.current()
+        self.executor = ThreadPoolExecutor(50)
+        self.io_loop = IOLoop.instance()
 
     @coroutine
-    def get(self, *args, **kwargs):
+    def prepare(self, *args, **kwargs):
+        kwargs = {k: self.request.arguments[k][0] for k in self.request.arguments if len(self.request.arguments[k])}
         args = args[1:]
-        for arg, value in self.request.arguments.items():
-            if len(value) == 1:
-                kwargs[arg] = value[0]
 
         # set the output callback
         # default json
@@ -131,7 +144,7 @@ class ApiHandler(RequestHandler):
             del kwargs[b"profile"]
 
         try:
-            outDict = yield self.async_call(_call_dispatcher, *args, **kwargs)
+            outDict = yield Task(self.async_call, _call_dispatcher, *args, **kwargs)
         except Exception as e:  # real internal error oohhh nooo :(
             logging.error("API :: {}".format(e))
             errorData = {
@@ -139,7 +152,7 @@ class ApiHandler(RequestHandler):
                 "args": args,
                 "kwargs": kwargs
             }
-            outDict = yield _responds(RESULT_FATAL, errorData,
+            outDict = _responds(RESULT_FATAL, errorData,
                                 "SiCKRAGE encountered an internal error! Please report to the Devs")
 
         if 'outputType' in outDict:
@@ -148,7 +161,8 @@ class ApiHandler(RequestHandler):
             outputCallback = outputCallbackDict[b'default']
 
         try:
-            self.finish(outputCallback(outDict))
+            if not self._finished:
+                self.finish(outputCallback(outDict))
         except Exception:
             pass
 
@@ -162,7 +176,7 @@ class ApiHandler(RequestHandler):
 
     def _out_as_image(self, _dict):
         self.set_header('Content-Type', _dict[b'image'].get_media_type())
-        return _dict[b'image'].get_media()
+        return _dict[b'image'].get_media
 
     def _out_as_json(self, _dict):
         self.set_header("Content-Type", "application/json;charset=UTF-8")
@@ -1267,7 +1281,7 @@ class CMD_Logs(ApiCall):
     def run(self):
         """ Get the logs """
         # 10 = Debug / 20 = Info / 30 = Warning / 40 = Error
-        minLevel = logger.logLevels[str(self.min_level).upper()]
+        minLevel = SRLogger.logLevels[str(self.min_level).upper()]
 
         data = []
         if ek(os.path.isfile, sickbeard.LOG_FILE):
@@ -1288,11 +1302,11 @@ class CMD_Logs(ApiCall):
 
             if match:
                 level = match.group(7)
-                if level not in logger.logLevels:
+                if level not in SRLogger.logLevels:
                     lastLine = False
                     continue
 
-                if logger.logLevels[level] >= minLevel:
+                if SRLogger.logLevels[level] >= minLevel:
                     lastLine = True
                     finalData.append(x.rstrip("\n"))
                 else:

@@ -44,6 +44,8 @@ import errno
 import ast
 import operator
 import platform
+from functools import partial
+
 import six
 import logging
 
@@ -69,11 +71,32 @@ from cachecontrol import CacheControl, caches
 from contextlib import closing
 from socket import timeout as SocketTimeout
 from itertools import izip, cycle
+from functools import partial
+from collections import deque
 
 # pylint: disable=W0212
 # Access to a protected member of a client class
 urllib._urlopener = classes.SickBeardURLopener()
 
+def readFileBuffered(filename, reverse=False):
+    blocksize = (1<<15)
+    with ek(io.open, filename, 'rb') as fh:
+        if reverse:
+            fh.seek(0, os.SEEK_END)
+        pos = fh.tell()
+        while True:
+            chunksize = min(blocksize, pos)
+
+            if reverse:
+                pos -= chunksize
+            else:
+                pos += chunksize
+
+            fh.seek(pos, os.SEEK_SET)
+            data = fh.read(chunksize)
+            if not data:
+                break
+            yield data
 
 def normalize_url(url):
     url = str(url)
@@ -1113,24 +1136,18 @@ def tryInt(s, s_default=0):
 
 
 # generates a md5 hash of a file
-def md5_for_file(filename, block_size=2 ** 16):
+def md5_for_file(filename):
     """
     Generate an md5 hash for a file
     :param filename: File to generate md5 hash for
-    :param block_size: Block size to use (defaults to 2^16)
     :return MD5 hexdigest on success, or None on failure
     """
 
     try:
-        with ek(io.open, filename, 'rb') as f:
-            md5 = hashlib.md5()
-            while True:
-                data = f.read(block_size)
-                if not data:
-                    break
-                md5.update(data)
-            f.close()
-            return md5.hexdigest()
+        md5 = hashlib.md5()
+        for byte in ek(readFileBuffered,filename):
+            md5.update(byte)
+        return md5.hexdigest()
     except Exception:
         return None
 
@@ -1166,7 +1183,7 @@ def anon_url(*url):
     """
     Return a URL string consisting of the Anonymous redirect URL and an arbitrary number of values appended.
     """
-    return '{}{}'.format(sickbeard.ANON_REDIRECT, url[1:])
+    return '{}{}'.format(sickbeard.ANON_REDIRECT, ''.join(map(str, url)))
 
 
 """
