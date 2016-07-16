@@ -1,4 +1,5 @@
 language: python
+
 python:
   - 2.7.10
 
@@ -8,21 +9,19 @@ branches:
   only:
     - master
 
-install: echo "Nothing required!"
-
 cache: pip
 
-before_script:
- - chmod +x ./tests/*.py
-
-script:
-  - python -m unittest discover tests
+script: .travis/run.sh
 
 after_failure:
   - cat ./tests/Logs/sickrage.log
 
 notifications:
-  irc: "irc.freenode.net#sickrage-updates"
+  irc:
+    channels:
+      - "irc.freenode.net#sickrage"
+    use_notice: true
+    skip_join: true
 
   email:
     on_success: change

@@ -1,7 +1,7 @@
 #!/usr/bin/env python2
-# -*- coding: utf-8 -*-
-# Author: echel0n <sickrage.tv@gmail.com>
-# URL: http://www.github.com/sickragetv/sickrage/
+
+# Author: echel0n <echel0n@sickrage.ca>
+# URL: https://git.sickrage.ca
 #
 # This file is part of SickRage.
 #
@@ -18,38 +18,28 @@
 # You should have received a copy of the GNU General Public License
 # along with SickRage.  If not, see <http://www.gnu.org/licenses/>.
 
-from __future__ import print_function
-from __future__ import unicode_literals
-
-import os.path
-import sys
-
-sys.path.insert(1, os.path.abspath(os.path.join(os.path.dirname(__file__), '../lib')))
-sys.path.insert(1, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+from __future__ import print_function, unicode_literals
 
 import unittest
 
-from tests import SiCKRAGETestCase, SiCKRAGETestDBCase
-
-import sickbeard
+import sickrage
+from tests import SiCKRAGETestCase
 
 
 class RSSTest(SiCKRAGETestCase): pass
 
-
 def test_get_rss(self, provider):
-    result = provider.cache.getRSSFeed(provider.url)
+    result = provider.cache.getRSSFeed(provider.urls['base_url'])
     if result:
-        self.assertTrue(isinstance(result[b'feed'], dict))
-        self.assertTrue(isinstance(result[b'entries'], list))
-        for item in result[b'entries']:
+        self.assertTrue(isinstance(result['feed'], dict))
+        self.assertTrue(isinstance(result['entries'], list))
+        for item in result['entries']:
             title, url = provider._get_title_and_url(item)
             self.assertTrue(title and url, "Failed to get title and url from RSS feed for %s" % provider.name)
 
 
-
-for provider in sickbeard.providers.sortedProviderList():
-    setattr(RSSTest, 'test_rss_%s' % provider.name, lambda self, x=provider: test_get_rss(self, x))
+for providerID, providerObj in sickrage.srCore.providersDict.all().items():
+    setattr(RSSTest, 'test_rss_%s' % providerObj.name, lambda self, x=providerObj: test_get_rss(self, x))
 
 if __name__ == "__main__":
     print("==================")

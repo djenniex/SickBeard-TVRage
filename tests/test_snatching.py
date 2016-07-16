@@ -1,7 +1,7 @@
 #!/usr/bin/env python2
-# -*- coding: utf-8 -*-
-# Author: echel0n <sickrage.tv@gmail.com>
-# URL: http://www.github.com/sickragetv/sickrage/
+
+# Author: echel0n <echel0n@sickrage.ca>
+# URL: https://git.sickrage.ca
 #
 # This file is part of SickRage.
 #
@@ -20,26 +20,20 @@
 
 from __future__ import unicode_literals
 
-import os.path
-import sys
-
-sys.path.insert(1, os.path.abspath(os.path.join(os.path.dirname(__file__), '../lib')))
-sys.path.insert(1, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-
 import unittest
 
-from tests import SiCKRAGETestCase, SiCKRAGETestDBCase
+import sickrage
+from sickrage.core.common import HD, SD, WANTED
+from sickrage.core.search import searchProviders
+from sickrage.core.tv.episode import TVEpisode
+from sickrage.core.tv.show import TVShow
+from tests import SiCKRAGETestDBCase
 
-import sickbeard.search as search
-import sickbeard
-from sickbeard.tv import TVEpisode, TVShow
-import sickbeard.common as c
-
-tests = {"Dexter": {"a": 1, "q": c.HD, "s": 5, "e": [7], "b": 'Dexter.S05E07.720p.BluRay.X264-REWARD',
+tests = {"Dexter": {"a": 1, "q": HD, "s": 5, "e": [7], "b": 'Dexter.S05E07.720p.BluRay.X264-REWARD',
                     "i": ['Dexter.S05E07.720p.BluRay.X264-REWARD', 'Dexter.S05E07.720p.X264-REWARD']},
-         "House": {"a": 1, "q": c.HD, "s": 4, "e": [5], "b": 'House.4x5.720p.BluRay.X264-REWARD',
+         "House": {"a": 1, "q": HD, "s": 4, "e": [5], "b": 'House.4x5.720p.BluRay.X264-REWARD',
                    "i": ['Dexter.S05E04.720p.X264-REWARD', 'House.4x5.720p.BluRay.X264-REWARD']},
-         "Hells Kitchen": {"a": 1, "q": c.SD, "s": 6, "e": [14, 15], "b": 'Hells.Kitchen.s6e14e15.HDTV.XviD-ASAP',
+         "Hells Kitchen": {"a": 1, "q": SD, "s": 6, "e": [14, 15], "b": 'Hells.Kitchen.s6e14e15.HDTV.XviD-ASAP',
                            "i": ['Hells.Kitchen.S06E14.HDTV.XviD-ASAP', 'Hells.Kitchen.6x14.HDTV.XviD-ASAP',
                                  'Hells.Kitchen.s6e14e15.HDTV.XviD-ASAP']}
          }
@@ -66,10 +60,6 @@ class SearchTest(SiCKRAGETestDBCase):
         return True
 
     def __init__(self, something):
-        for provider in sickbeard.providers.sortedProviderList():
-            provider.getURL = self._fake_getURL
-            # provider.isActive = self._fake_isActive
-
         super(SearchTest, self).__init__(something)
         super(SearchTest, self).setUp()
 
@@ -77,23 +67,24 @@ class SearchTest(SiCKRAGETestDBCase):
 def test_generator(tvdbdid, show_name, curData, forceSearch):
     def test(self):
         global searchItems
-        searchItems = curData[b"i"]
+        searchItems = curData["i"]
         show = TVShow(1, tvdbdid)
         show.name = show_name
-        show.quality = curData[b"q"]
+        show.quality = curData["q"]
         show.saveToDB()
-        sickbeard.showList.append(show)
+        show.loadFromDB(skipNFO=True)
+        sickrage.srCore.SHOWLIST.append(show)
         episode = None
 
-        for epNumber in curData[b"e"]:
-            episode = TVEpisode(show, curData[b"s"], epNumber)
-            episode.status = c.WANTED
+        for epNumber in curData["e"]:
+            episode = TVEpisode(show, curData["s"], epNumber)
+            episode.status = WANTED
             episode.saveToDB()
 
-        bestResult = search.searchProviders(show, episode.episode, forceSearch)
+        bestResult = searchProviders(show, episode.episode, forceSearch)
         if not bestResult:
-            self.assertEqual(curData[b"b"], bestResult)
-        self.assertEqual(curData[b"b"], bestResult.name)  # first is expected, second is choosen one
+            self.assertEqual(curData["b"], bestResult)
+        self.assertEqual(curData["b"], bestResult.name)  # first is expected, second is choosen one
 
     return test
 
@@ -107,7 +98,7 @@ if __name__ == '__main__':
     tvdbdid = 1
     for forceSearch in (True, False):
         for name, curData in tests.items():
-            if not curData[b"a"]:
+            if not curData["a"]:
                 continue
             fname = name.replace(' ', '_')
             if forceSearch:

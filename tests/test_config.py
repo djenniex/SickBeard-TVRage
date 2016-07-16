@@ -1,7 +1,7 @@
 #!/usr/bin/env python2
-# -*- coding: utf-8 -*-
-# Author: echel0n <sickrage.tv@gmail.com>
-# URL: http://www.github.com/sickragetv/sickrage/
+
+# Author: echel0n <echel0n@sickrage.ca>
+# URL: https://git.sickrage.ca
 #
 # This file is part of SickRage.
 #
@@ -18,30 +18,23 @@
 # You should have received a copy of the GNU General Public License
 # along with SickRage.  If not, see <http://www.gnu.org/licenses/>.
 
-from __future__ import print_function
-from __future__ import unicode_literals
-
-import os.path
-import sys
-
-sys.path.insert(1, os.path.abspath(os.path.join(os.path.dirname(__file__), '../lib')))
-sys.path.insert(1, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+from __future__ import print_function, unicode_literals
 
 import unittest
 
+import sickrage
+import sickrage.core
 from tests import SiCKRAGETestCase
-
-from sickbeard import config
 
 
 class QualityTests(SiCKRAGETestCase):
     def test_clean_url(self):
-        self.assertEqual(config.clean_url("https://subdomain.domain.tld/endpoint"),
+        self.assertEqual(sickrage.srCore.srConfig.clean_url("https://subdomain.domain.tld/endpoint"),
                          "https://subdomain.domain.tld/endpoint")
-        self.assertEqual(config.clean_url("google.com/xml.rpc"), "http://google.com/xml.rpc")
-        self.assertEqual(config.clean_url("google.com"), "http://google.com/")
-        self.assertEqual(config.clean_url("http://www.example.com/folder/"), "http://www.example.com/folder/")
-        self.assertEqual(config.clean_url("scgi:///home/user/.config/path/socket"),
+        self.assertEqual(sickrage.srCore.srConfig.clean_url("google.com/xml.rpc"), "http://google.com/xml.rpc")
+        self.assertEqual(sickrage.srCore.srConfig.clean_url("google.com"), "http://google.com/")
+        self.assertEqual(sickrage.srCore.srConfig.clean_url("http://www.example.com/folder/"), "http://www.example.com/folder/")
+        self.assertEqual(sickrage.srCore.srConfig.clean_url("scgi:///home/user/.config/path/socket"),
                          "scgi:///home/user/.config/path/socket")
 
 

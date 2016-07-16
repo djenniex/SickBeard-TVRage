@@ -1,7 +1,7 @@
 #!/usr/bin/env python2
-# -*- coding: utf-8 -*-
-# Author: echel0n <sickrage.tv@gmail.com>
-# URL: http://www.github.com/sickragetv/sickrage/
+
+# Author: echel0n <echel0n@sickrage.ca>
+# URL: https://git.sickrage.ca
 #
 # This file is part of SickRage.
 #
@@ -20,46 +20,33 @@
 
 from __future__ import unicode_literals
 
-import os.path
-import sys
-
-sys.path.insert(1, os.path.abspath(os.path.join(os.path.dirname(__file__), '../lib')))
-sys.path.insert(1, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-
 import unittest
-
-from tests import SiCKRAGETestCase, SiCKRAGETestDBCase
-
 import urlparse
-import requests
-from bs4 import BeautifulSoup
-from sickbeard.helpers import getURL
+
+from sickrage.core import srSession
+from sickrage.core.helpers import bs4_parser
+from tests import SiCKRAGETestDBCase
 
 
 class TorrentBasicTests(SiCKRAGETestDBCase):
     def test_search(self):
-        self.url = 'http://kickass.to/'
-        searchURL = 'http://kickass.to/usearch/American%20Dad%21%20S08%20-S08E%20category%3Atv/?field=seeders&sorder=desc'
+        self.url = 'kickass.unblocked.li'
+        searchURL = '{}/usearch/American%20Dad%20S08/'.format(self.url)
 
-        html = getURL(searchURL, session=requests.Session())
-        if not html:
+        data = srSession().get(searchURL)
+        if not data:
             return
 
-        soup = BeautifulSoup(html, features=["html5lib", "permissive"])
-
-        torrent_table = soup.find('table', attrs={'class': 'data'})
-        torrent_rows = torrent_table.find_all('tr') if torrent_table else []
-
-        # cleanup memory
-        soup.clear(True)
+        with bs4_parser(data) as html:
+            torrent_table = html.find('table', attrs={'class': 'data'})
 
         # Continue only if one Release is found
+        torrent_rows = torrent_table.find_all('tr') if torrent_table else []
         if len(torrent_rows) < 2:
             print("The data returned does not contain any torrents")
             return
 
         for tr in torrent_rows[1:]:
-
             try:
                 link = urlparse.urljoin(self.url, (tr.find('div', {'class': 'torrentname'}).find_all('a')[1])['href'])
                 id = tr.get('id')[-7:]

@@ -1,7 +1,7 @@
 #!/usr/bin/env python2
-# -*- coding: utf-8 -*-
-# Author: echel0n <sickrage.tv@gmail.com>
-# URL: http://www.github.com/sickragetv/sickrage/
+
+# Author: echel0n <echel0n@sickrage.ca>
+# URL: https://git.sickrage.ca
 #
 # This file is part of SickRage.
 #
@@ -18,23 +18,16 @@
 # You should have received a copy of the GNU General Public License
 # along with SickRage.  If not, see <http://www.gnu.org/licenses/>.
 
-from __future__ import print_function
-from __future__ import unicode_literals
-
-import os.path
-import sys
-
-sys.path.insert(1, os.path.abspath(os.path.join(os.path.dirname(__file__), '../lib')))
-sys.path.insert(1, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+from __future__ import print_function, unicode_literals
 
 import unittest
 
-from tests import SiCKRAGETestCase
-
 import certifi
 import requests
-import sickbeard.providers as providers
-from sickrage.helper.exceptions import ex
+
+import sickrage
+from tests import SiCKRAGETestCase
+
 
 class SNI_Tests(SiCKRAGETestCase): pass
 
@@ -44,13 +37,14 @@ def test_sni(self, provider):
     except requests.exceptions.Timeout:
         pass
     except requests.exceptions.SSLError as error:
-        if 'SSL3_GET_SERVER_CERTIFICATE' not in ex(error):
+        if 'SSL3_GET_SERVER_CERTIFICATE' not in error:
             print(error)
     except Exception:
         pass
 
-for provider in providers.sortedProviderList():
-    setattr(SNI_Tests, 'test_%s' % provider.name, lambda self, x=provider: test_sni(self, x))
+
+for providerID, providerObj in sickrage.srCore.providersDict.all().items():
+    setattr(SNI_Tests, 'test_%s' % providerObj.name, lambda self, x=providerObj: test_sni(self, x))
 
 if __name__ == "__main__":
     print("==================")

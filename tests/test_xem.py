@@ -1,7 +1,7 @@
 #!/usr/bin/env python2
-# -*- coding: utf-8 -*-
-# Author: echel0n <sickrage.tv@gmail.com>
-# URL: http://www.github.com/sickragetv/sickrage/
+
+# Author: echel0n <echel0n@sickrage.ca>
+# URL: https://git.sickrage.ca
 #
 # This file is part of SickRage.
 #
@@ -20,18 +20,13 @@
 
 from __future__ import unicode_literals
 
-import os.path
-import sys
-
-sys.path.insert(1, os.path.abspath(os.path.join(os.path.dirname(__file__), '../lib')))
-sys.path.insert(1, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-
-import unittest
 import re
+import unittest
 
-from tests import SiCKRAGETestCase, SiCKRAGETestDBCase, db
-import sickbeard
-from sickbeard.tv import TVShow
+import sickrage
+from sickrage.core.databases import main_db
+from sickrage.core.tv.show import TVShow
+from tests import SiCKRAGETestDBCase
 
 
 class XEMBasicTests(SiCKRAGETestDBCase):
@@ -40,13 +35,14 @@ class XEMBasicTests(SiCKRAGETestDBCase):
         Populates the showList with shows from the database
         """
 
-        myDB = db.DBConnection()
-        sqlResults = myDB.select("SELECT * FROM tv_shows")
+        sqlResults = main_db.MainDB().select("SELECT * FROM tv_shows")
 
         for sqlShow in sqlResults:
             try:
-                curShow = TVShow(int(sqlShow[b"indexer"]), int(sqlShow[b"indexer_id"]))
-                sickbeard.showList.append(curShow)
+                curShow = TVShow(int(sqlShow["indexer"]), int(sqlShow["indexer_id"]))
+                curShow.saveToDB()
+                curShow.loadFromDB(skipNFO=True)
+                sickrage.srCore.SHOWLIST.append(curShow)
             except Exception:
                 pass
 
@@ -55,13 +51,14 @@ class XEMBasicTests(SiCKRAGETestDBCase):
         Populates the showList with shows from the database
         """
 
-        myDB = db.DBConnection()
-        sqlResults = myDB.select("SELECT * FROM tv_shows")
+        sqlResults = main_db.MainDB().select("SELECT * FROM tv_shows")
 
         for sqlShow in sqlResults:
             try:
-                curShow = TVShow(int(sqlShow[b"indexer"]), int(sqlShow[b"indexer_id"]))
-                sickbeard.showList.append(curShow)
+                curShow = TVShow(int(sqlShow["indexer"]), int(sqlShow["indexer_id"]))
+                curShow.saveToDB()
+                curShow.loadFromDB(skipNFO=True)
+                sickrage.srCore.SHOWLIST.append(curShow)
             except Exception as e:
                 print "There was an error creating the show"
 
