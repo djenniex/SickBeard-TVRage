@@ -1,5 +1,5 @@
 # Author: echel0n <echel0n@sickrage.ca>
-# URL: http://github.com/SiCKRAGETV/SickRage/
+# URL: https://sickrage.ca
 #
 # This file is part of SickRage.
 #
@@ -25,15 +25,16 @@ import time
 import traceback
 
 import sickrage
-from sickrage.core.caches import tv_cache
+from sickrage.core.caches.tv_cache import TVCache
+from sickrage.core.helpers import convert_size
 from sickrage.indexers.config import INDEXER_TVDB
 from sickrage.providers import TorrentProvider
 
 class RarbgProvider(TorrentProvider):
     def __init__(self):
-        super(RarbgProvider, self).__init__("Rarbg",'torrentapi.org')
+        super(RarbgProvider, self).__init__("Rarbg",'torrentapi.org', False)
 
-        self.supportsBacklog = True
+        self.supports_backlog = True
 
         self.ratio = None
         self.minseed = None
@@ -68,9 +69,9 @@ class RarbgProvider(TorrentProvider):
 
         self.next_request = datetime.datetime.now()
 
-        self.cache = RarbgCache(self)
+        self.cache = TVCache(self, min_time=10)
 
-    def _doLogin(self):
+    def login(self):
         if self.token and self.tokenExpireDate and datetime.datetime.now() < self.tokenExpireDate:
             return True
 
@@ -96,7 +97,7 @@ class RarbgProvider(TorrentProvider):
         results = []
         items = {'Season': [], 'Episode': [], 'RSS': []}
 
-        if not self._doLogin():
+        if not self.login():
             return results
 
         if epObj is not None:
@@ -147,7 +148,7 @@ class RarbgProvider(TorrentProvider):
                     while retry > 0:
                         time_out = 0
                         while (datetime.datetime.now() < self.next_request) and time_out <= 15:
-                            time_out = time_out + 1
+                            time_out += 1
                             time.sleep(1)
 
                         self.next_request = datetime.datetime.now() + datetime.timedelta(seconds=10)
@@ -169,7 +170,7 @@ class RarbgProvider(TorrentProvider):
                             return results
                         if re.search('Too many requests per minute. Please try again later!', data):
                             sickrage.srCore.srLogger.warning("Too many requests per minute")
-                            retry = retry - 1
+                            retry -= 1
                             time.sleep(10)
                             continue
                         if re.search('Cant find search_tvdb in database. Are you sure this imdb exists?', data):
@@ -178,10 +179,10 @@ class RarbgProvider(TorrentProvider):
                             raise StopIteration
                         if re.search('Invalid token. Use get_token for a new one!', data):
                             sickrage.srCore.srLogger.debug("Invalid token, retrieving new token")
-                            retry = retry - 1
+                            retry -= 1
                             self.token = None
                             self.tokenExpireDate = None
-                            if not self._doLogin():
+                            if not self.login():
                                 sickrage.srCore.srLogger.debug("Failed retrieving new token")
                                 return results
                             sickrage.srCore.srLogger.debug("Using new token")
@@ -211,7 +212,7 @@ class RarbgProvider(TorrentProvider):
                         try:
                             title = item['title']
                             download_url = item['download']
-                            size = item['size']
+                            size = convert_size(item['size'])
                             seeders = item['seeders']
                             leechers = item['leechers']
                             # pubdate = item['pubdate']
@@ -236,17 +237,5 @@ class RarbgProvider(TorrentProvider):
 
         return results
 
-    def seedRatio(self):
+    def seed_ratio(self):
         return self.ratio
-
-
-class RarbgCache(tv_cache.TVCache):
-    def __init__(self, provider_obj):
-        tv_cache.TVCache.__init__(self, provider_obj)
-
-        # only poll RARBG every 10 minutes max
-        self.minTime = 10
-
-    def _getRSSData(self):
-        search_params = {'RSS': ['']}
-        return {'entries': self.provider.search(search_params)}

@@ -1,7 +1,7 @@
-#!/usr/bin/env python2
+
 
 # Author: echel0n <echel0n@sickrage.ca>
-# URL: https://git.sickrage.ca
+# URL: https://sickrage.ca
 #
 # This file is part of SickRage.
 #
@@ -24,15 +24,15 @@ import re
 import traceback
 
 import sickrage
-from sickrage.core.caches import tv_cache
+from sickrage.core.caches.tv_cache import TVCache
 from sickrage.core.helpers import bs4_parser
 from sickrage.providers import TorrentProvider
 
 
 class AlphaRatioProvider(TorrentProvider):
     def __init__(self):
-        super(AlphaRatioProvider, self).__init__("AlphaRatio", 'alpharatio.cc')
-        self.supportsBacklog = True
+        super(AlphaRatioProvider, self).__init__("AlphaRatio", 'alpharatio.cc', True)
+        self.supports_backlog = True
         self.username = None
         self.password = None
         self.ratio = None
@@ -50,9 +50,9 @@ class AlphaRatioProvider(TorrentProvider):
 
         self.proper_strings = ['PROPER', 'REPACK']
 
-        self.cache = AlphaRatioCache(self)
+        self.cache = TVCache(self, min_time=20)
 
-    def _doLogin(self):
+    def login(self):
         login_params = {'username': self.username,
                         'password': self.password,
                         'remember_me': 'on',
@@ -76,7 +76,7 @@ class AlphaRatioProvider(TorrentProvider):
         results = []
         items = {'Season': [], 'Episode': [], 'RSS': []}
 
-        if not self._doLogin():
+        if not self.login():
             return results
 
         for mode in search_strings.keys():
@@ -147,17 +147,5 @@ class AlphaRatioProvider(TorrentProvider):
 
         return results
 
-    def seedRatio(self):
+    def seed_ratio(self):
         return self.ratio
-
-
-class AlphaRatioCache(tv_cache.TVCache):
-    def __init__(self, provider_obj):
-        tv_cache.TVCache.__init__(self, provider_obj)
-
-        # only poll AlphaRatio every 20 minutes max
-        self.minTime = 20
-
-    def _getRSSData(self):
-        search_strings = {'RSS': ['']}
-        return {'entries': self.provider.search(search_strings)}

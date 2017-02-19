@@ -1,5 +1,5 @@
 # Author: echel0n <echel0n@sickrage.ca>
-# URL: http://github.com/SiCKRAGETV/SickRage/
+# URL: https://sickrage.ca
 #
 # This file is part of SickRage.
 #
@@ -21,21 +21,24 @@ from __future__ import unicode_literals
 import random
 
 import feedparser
-from feedparser import FeedParserDict
-
 import sickrage
+from feedparser import FeedParserDict
 from sickrage.core.webclient import USER_AGENTS
 
 
-def getFeed(url, request_headers=None, handlers=None):
+def getFeed(url, params=None, request_headers=None, handlers=None):
     try:
-        return feedparser.parse(
-            sickrage.srCore.srWebSession.normalize_url(url),
-            agent=random.choice(USER_AGENTS),
-            etag=False,
-            modified=False,
-            request_headers=request_headers,
-            handlers=handlers
-        )
-    except Exception:
-        return FeedParserDict()
+        resp = sickrage.srCore.srWebSession.get(url, params=params)
+        if resp.ok:
+            return feedparser.parse(
+                resp.text,
+                agent=random.choice(USER_AGENTS),
+                etag=False,
+                modified=False,
+                request_headers=request_headers,
+                handlers=handlers
+            )
+    except Exception as e:
+        sickrage.srCore.srLogger.debug("RSS Error: {}".format(e.message))
+
+    return FeedParserDict()

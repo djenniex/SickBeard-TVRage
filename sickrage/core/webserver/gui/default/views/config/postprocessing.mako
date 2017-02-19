@@ -240,7 +240,7 @@
                             </label>
                             <label class="nocheck">
                                 <span class="component-title">&nbsp;</span>
-                                <span class="component-desc">See <a href="https://github.com/SiCKRAGETV/sickrage-issues/wiki/Post-Processing#extra-scripts"><font color='red'><b>Wiki</b></font></a> for script arguments description and usage.</span>
+                                <span class="component-desc">See <a href="https://git.sickrage.ca/SiCKRAGE/sickrage/wikis/Post-Processing#extra-scripts"><font color='red'><b>Wiki</b></font></a> for script arguments description and usage.</span>
                             </label>
                         </div>
                         <input type="submit" class="btn config_submitter" value="Save Changes" /><br>
@@ -645,7 +645,7 @@
                             </div><!-- /naming_abd_custom -->
 
                             <div id="naming_abd_example_div">
-                                <h3>Sample:</h3>
+                                <h3>Air-by-date Sample:</h3>
                                 <div class="example">
                                     <span class="jumbo" id="naming_abd_example">&nbsp;</span>
                                 </div>
@@ -827,7 +827,7 @@
                             </div><!-- /naming_sports_custom -->
 
                             <div id="naming_sports_example_div">
-                                <h3>Sample:</h3>
+                                <h3>Sports Sample:</h3>
                                 <div class="example">
                                     <span class="jumbo" id="naming_sports_example">&nbsp;</span>
                                 </div>

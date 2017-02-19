@@ -1,7 +1,6 @@
-#!/usr/bin/env python2
-
+#!/usr/bin/env python2.7
 # Author: echel0n <echel0n@sickrage.ca>
-# URL: https://git.sickrage.ca
+# URL: https://sickrage.ca
 #
 # This file is part of SickRage.
 #
@@ -63,7 +62,7 @@ class PPBasicTests(SiCKRAGETestDBCase):
         ep.name = "some ep name"
         ep.saveToDB()
 
-        sickrage.srCore.NAMECACHE.addNameToCache('show name', 3)
+        sickrage.srCore.NAMECACHE.put('show name', 3)
         self.pp = PostProcessor(FILEPATH, process_method='move')
         self.assertTrue(self.pp.process)
 

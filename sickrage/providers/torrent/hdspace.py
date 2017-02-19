@@ -1,7 +1,7 @@
 # Author: Idan Gutman
 # Modified by jkaberg, https://github.com/jkaberg for SceneAccess
 # Modified by 7ca for HDSpace
-# URL: http://github.com/SiCKRAGETV/SickRage/
+# URL: https://sickrage.ca
 #
 # This file is part of SickRage.
 #
@@ -24,18 +24,17 @@ import re
 import urllib
 
 import requests
-
 import sickrage
-from sickrage.core.caches import tv_cache
+from sickrage.core.caches.tv_cache import TVCache
 from sickrage.core.helpers import bs4_parser, convert_size
 from sickrage.providers import TorrentProvider
 
 
 class HDSpaceProvider(TorrentProvider):
     def __init__(self):
-        super(HDSpaceProvider, self).__init__("HDSpace", 'hd-space.org')
+        super(HDSpaceProvider, self).__init__("HDSpace", 'hd-space.org', True)
 
-        self.supportsBacklog = True
+        self.supports_backlog = True
 
         self.username = None
         self.password = None
@@ -43,7 +42,7 @@ class HDSpaceProvider(TorrentProvider):
         self.minseed = None
         self.minleech = None
 
-        self.cache = HDSpaceCache(self)
+        self.cache = TVCache(self, min_time=10)
 
         self.urls.update({
             'login': '{base_url}/index.php?page=login'.format(base_url=self.urls['base_url']),
@@ -57,14 +56,14 @@ class HDSpaceProvider(TorrentProvider):
             self.urls['rss'] += '&cat[]=' + str(cat)
         self.urls['search'] = self.urls['search'][:-4]  # remove extra %%3B
 
-    def _checkAuth(self):
+    def _check_auth(self):
 
         if not self.username or not self.password:
             sickrage.srCore.srLogger.warning("[{}]: Invalid username or password. Check your settings".format(self.name))
 
         return True
 
-    def _doLogin(self):
+    def login(self):
 
         if 'pass' in requests.utils.dict_from_cookiejar(sickrage.srCore.srWebSession.cookies):
             return True
@@ -89,7 +88,7 @@ class HDSpaceProvider(TorrentProvider):
         results = []
         items = {'Season': [], 'Episode': [], 'RSS': []}
 
-        if not self._doLogin():
+        if not self.login():
             return results
 
         for mode in search_strings.keys():
@@ -171,17 +170,5 @@ class HDSpaceProvider(TorrentProvider):
 
         return results
 
-    def seedRatio(self):
+    def seed_ratio(self):
         return self.ratio
-
-
-class HDSpaceCache(tv_cache.TVCache):
-    def __init__(self, provider_obj):
-        tv_cache.TVCache.__init__(self, provider_obj)
-
-        # only poll HDSpace every 10 minutes max
-        self.minTime = 10
-
-    def _getRSSData(self):
-        search_strings = {'RSS': ['']}
-        return {'entries': self.provider.search(search_strings)}

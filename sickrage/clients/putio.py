@@ -1,6 +1,6 @@
-#!/usr/bin/env python2
+
 # Author: echel0n <echel0n@sickrage.ca>
-# URL: https://git.sickrage.ca
+# URL: https://sickrage.ca
 #
 # This file is part of SickRage.
 #
@@ -50,12 +50,10 @@ class PutioAPI(GenericClient):
         try:
             response = sickrage.srCore.srWebSession.post(self.url, data=post_data,
                                                          allow_redirects=False,
-                                                         raise_exceptions=False,
                                                          verify=bool(sickrage.srCore.srConfig.TORRENT_VERIFY_CERT))
 
             response = sickrage.srCore.srWebSession.get(response.headers['location'],
                                                         allow_redirects=False,
-                                                        raise_exceptions=False,
                                                         verify=bool(sickrage.srCore.srConfig.TORRENT_VERIFY_CERT))
 
             resulting_uri = '{redirect_uri}#access_token=(.*)'.format(

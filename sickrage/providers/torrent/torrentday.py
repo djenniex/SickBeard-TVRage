@@ -1,7 +1,5 @@
-#!/usr/bin/env python2
-
 # Author: echel0n <echel0n@sickrage.ca>
-# URL: https://git.sickrage.ca
+# URL: https://sickrage.ca
 #
 # This file is part of SickRage.
 #
@@ -22,33 +20,31 @@ from __future__ import unicode_literals
 
 import re
 
-import requests
+from requests.utils import dict_from_cookiejar
 
 import sickrage
-from sickrage.core.caches import tv_cache
+from sickrage.core.caches.tv_cache import TVCache
 from sickrage.providers import TorrentProvider
 
 
 class TorrentDayProvider(TorrentProvider):
     def __init__(self):
 
-        super(TorrentDayProvider, self).__init__("TorrentDay", 'classic.torrentday.com')
+        super(TorrentDayProvider, self).__init__("TorrentDay", 'classic.torrentday.com', True)
 
-        self.supportsBacklog = True
-
-        self._uid = None
-        self._hash = None
         self.username = None
         self.password = None
-        self.ratio = None
+
         self.freeleech = False
         self.minseed = None
         self.minleech = None
 
-        self.cache = TorrentDayCache(self)
+        self.enable_cookies = True
+
+        self.cache = TVCache(self, min_time=10)
 
         self.urls.update({
-            'login': '{base_url}/torrents/'.format(base_url=self.urls['base_url']),
+            'login': '{base_url}/t'.format(base_url=self.urls['base_url']),
             'search': '{base_url}/V3/API/API.php'.format(base_url=self.urls['base_url']),
             'download': '{base_url}/download.php/%s/%s'.format(base_url=self.urls['base_url'])
         })
@@ -58,47 +54,37 @@ class TorrentDayProvider(TorrentProvider):
         self.categories = {'Season': {'c14': 1}, 'Episode': {'c2': 1, 'c26': 1, 'c7': 1, 'c24': 1},
                            'RSS': {'c2': 1, 'c26': 1, 'c7': 1, 'c24': 1, 'c14': 1}}
 
-    def _doLogin(self):
-
-        if any(requests.utils.dict_from_cookiejar(sickrage.srCore.srWebSession.cookies).values()):
+    def login(self):
+        cookie_dict = dict_from_cookiejar(self.cookie_jar)
+        if cookie_dict.get('uid') and cookie_dict.get('pass'):
             return True
 
-        if self._uid and self._hash:
-            requests.utils.add_dict_to_cookiejar(sickrage.srCore.srWebSession.cookies, self.cookies)
-        else:
-
-            login_params = {'username': self.username,
-                            'password': self.password,
-                            'submit.x': 0,
-                            'submit.y': 0}
-
-            try:
-                response = sickrage.srCore.srWebSession.post(self.urls['login'], data=login_params, timeout=30).text
-            except Exception:
-                sickrage.srCore.srLogger.warning("[{}]: Unable to connect to provider".format(self.name))
-                return False
-
-            if re.search('You tried too often', response):
-                sickrage.srCore.srLogger.warning("Too many login access attempts")
-                return False
-
-            try:
-                    self._uid = requests.utils.dict_from_cookiejar(sickrage.srCore.srWebSession.cookies)['uid']
-                    self._hash = requests.utils.dict_from_cookiejar(sickrage.srCore.srWebSession.cookies)['pass']
-                    self.cookies = {'uid': self._uid, 'pass': self._hash}
-                    return True
-            except Exception:
-                pass
-
-            sickrage.srCore.srLogger.warning("Unable to obtain cookie")
+        if not self.add_cookies_from_ui():
             return False
+
+        login_params = {'username': self.username, 'password': self.password, 'submit.x': 0, 'submit.y': 0}
+
+        response = sickrage.srCore.srWebSession.post(self.urls['login'], data=login_params)
+        if not response.ok:
+            sickrage.srCore.srLogger.warning("[{}]: Unable to connect to provider".format(self.name))
+            return False
+
+        if re.search('You tried too often', response.text):
+            sickrage.srCore.srLogger.warning("Too many login access attempts")
+            return False
+
+        if not dict_from_cookiejar(sickrage.srCore.srWebSession.cookies).get('uid') in response.text:
+            sickrage.srCore.srLogger.warning("Failed to login, check your cookies")
+            return False
+
+        return True
 
     def search(self, search_params, search_mode='eponly', epcount=0, age=0, epObj=None):
 
         results = []
         items = {'Season': [], 'Episode': [], 'RSS': []}
 
-        if not self._doLogin():
+        if not self.login():
             return results
 
         for mode in search_params.keys():
@@ -155,17 +141,3 @@ class TorrentDayProvider(TorrentProvider):
 
         return results
 
-    def seedRatio(self):
-        return self.ratio
-
-
-class TorrentDayCache(tv_cache.TVCache):
-    def __init__(self, provider_obj):
-        tv_cache.TVCache.__init__(self, provider_obj)
-
-        # Only poll IPTorrents every 10 minutes max
-        self.minTime = 10
-
-    def _getRSSData(self):
-        search_params = {'RSS': ['']}
-        return {'entries': self.provider.search(search_params)}

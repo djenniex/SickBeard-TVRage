@@ -23,18 +23,18 @@ import base64
 import datetime
 import os
 import os.path
+import pickle
 import platform
 import re
+import sys
 import urlparse
 import uuid
 from itertools import izip, cycle
 
-from configobj import ConfigObj
-
 import sickrage
+from configobj import ConfigObj
 from sickrage.core.classes import srIntervalTrigger
-from sickrage.core.common import SD, WANTED, SKIPPED
-from sickrage.core.databases import main_db
+from sickrage.core.common import SD, WANTED, SKIPPED, Quality
 from sickrage.core.helpers import backupVersionedFile, makeDir, generateCookieSecret, autoType, get_temp_dir
 from sickrage.core.nameparser import validator
 from sickrage.core.nameparser.validator import check_force_season_folders
@@ -76,6 +76,7 @@ class srConfig(object):
         self.VERSION_NOTIFY = False
         self.AUTO_UPDATE = False
         self.NOTIFY_ON_UPDATE = False
+        self.PIP_PATH = ""
         self.GIT_RESET = True
         self.GIT_USERNAME = ""
         self.GIT_PASSWORD = ""
@@ -414,6 +415,8 @@ class srConfig(object):
         self.OPENSUBTITLES_PASS = None
         self.LEGENDASTV_USER = None
         self.LEGENDASTV_PASS = None
+        self.ITASA_USER = None
+        self.ITASA_PASS = None
         self.USE_FAILED_DOWNLOADS = False
         self.DELETE_FAILED = False
         self.EXTRA_SCRIPTS = None
@@ -424,7 +427,6 @@ class srConfig(object):
         self.CALENDAR_UNPROTECTED = False
         self.CALENDAR_ICONS = False
         self.NO_RESTART = False
-        self.TMDB_API_KEY = 'edc5f123313769de83a71e157758030b'
         self.THETVDB_APITOKEN = None
         self.TRAKT_API_KEY = '5c65f55e11d48c35385d9e8670615763a605fad28374c8ae553a7b7a50651ddd'
         self.TRAKT_API_SECRET = 'b53e32045ac122a445ef163e6d859403301ffe9b17fb8321d428531b69022a82'
@@ -454,6 +456,10 @@ class srConfig(object):
 
         self.DEFAULT_SHOWUPDATE_HOUR = 3
         self.SHOWUPDATE_HOUR = None
+
+        self.QUALITY_SIZES = {}
+
+        self.CUSTOM_PROVIDERS = None
 
     def defaults(self):
         sickrage.srCore.srLogger.debug("Loading default config values")
@@ -572,6 +578,7 @@ class srConfig(object):
         defaults['General']['create_missing_show_dirs'] = int(self.CREATE_MISSING_SHOW_DIRS)
         defaults['General']['add_shows_wo_dir'] = int(self.ADD_SHOWS_WO_DIR)
         defaults['General']['extra_scripts'] = '|'.join(self.EXTRA_SCRIPTS)
+        defaults['General']['pip_path'] = self.PIP_PATH
         defaults['General']['git_path'] = self.GIT_PATH
         defaults['General']['ignore_words'] = self.IGNORE_WORDS
         defaults['General']['require_words'] = self.REQUIRE_WORDS
@@ -885,9 +892,9 @@ class srConfig(object):
         defaults['Providers']['providers_order'] = sickrage.srCore.providersDict.provider_order
 
         provider_keys = ['enabled', 'confirmed', 'ranked', 'engrelease', 'onlyspasearch', 'sorting', 'options', 'ratio',
-                         'minseed', 'minleech', 'freeleech', 'search_mode', 'search_fallback', 'enable_daily',
+                         'minseed', 'minleech', 'freeleech', 'search_mode', 'search_fallback', 'enable_daily', 'key',
                          'enable_backlog', 'cat', 'subtitle', 'api_key', 'hash', 'digest', 'username', 'password',
-                         'passkey', 'pin']
+                         'passkey', 'pin', 'reject_m2ts', 'enable_cookies', 'cookies']
 
         for providerID, providerObj in sickrage.srCore.providersDict.all().items():
             defaults['Providers'][providerID] = dict(
@@ -1322,7 +1329,6 @@ class srConfig(object):
     ################################################################################
     # Check_setting_str                                                            #
     ################################################################################
-
     def check_setting_str(self, section, key, def_val="", silent=True):
         my_val = self.CONFIG_OBJ.get(section, {section: key}).get(key, def_val)
 
@@ -1330,6 +1336,17 @@ class srConfig(object):
             censored_regex = re.compile(r"|".join(re.escape(word) for word in ["password", "token", "api"]), re.I)
             if censored_regex.search(key) or (section, key) in self.CENSORED_ITEMS:
                 self.CENSORED_ITEMS[section, key] = my_val
+
+        if not silent:
+            print(key + " -> " + my_val)
+
+        return my_val
+
+    ################################################################################
+    # Check_setting_pickle                                                           #
+    ################################################################################
+    def check_setting_pickle(self, section, key, def_val="", silent=True):
+        my_val = pickle.loads(self.CONFIG_OBJ.get(section, {section: key}).get(key, pickle.dumps(def_val)))
 
         if not silent:
             print(key + " -> " + my_val)
@@ -1380,6 +1397,8 @@ class srConfig(object):
         self.SOCKET_TIMEOUT = self.check_setting_int('General', 'socket_timeout', 30)
 
         self.DEFAULT_PAGE = self.check_setting_str('General', 'default_page', 'home')
+
+        self.PIP_PATH = self.check_setting_str('General', 'pip_path', 'pip')
 
         self.GIT_PATH = self.check_setting_str('General', 'git_path', 'git')
         self.GIT_AUTOISSUES = bool(self.check_setting_int('General', 'git_autoissues', 0))
@@ -1815,6 +1834,9 @@ class srConfig(object):
         self.LEGENDASTV_USER = self.check_setting_str('Subtitles', 'legendastv_username', '')
         self.LEGENDASTV_PASS = self.check_setting_str('Subtitles', 'legendastv_password', '')
 
+        self.ITASA_USER = self.check_setting_str('Subtitles', 'itasa_username', '')
+        self.ITASA_PASS = self.check_setting_str('Subtitles', 'itasa_password', '')
+
         self.OPENSUBTITLES_USER = self.check_setting_str('Subtitles', 'opensubtitles_username', '')
         self.OPENSUBTITLES_PASS = self.check_setting_str('Subtitles', 'opensubtitles_password', '')
 
@@ -1871,12 +1893,21 @@ class srConfig(object):
         self.FILTER_ROW = bool(self.check_setting_int('GUI', 'filter_row', 1))
         self.DISPLAY_ALL_SEASONS = bool(self.check_setting_int('General', 'display_all_seasons', 1))
 
+        self.QUALITY_SIZES = self.check_setting_pickle('Quality', 'sizes', Quality.qualitySizes)
+
+        self.CUSTOM_PROVIDERS = self.check_setting_str('Providers', 'custom_providers', '')
+
+        sickrage.srCore.providersDict.load()
         for providerID, providerObj in sickrage.srCore.providersDict.all().items():
             providerSettings = self.check_setting_str('Providers', providerID) or {}
             for k, v in providerSettings.items():
                 providerSettings[k] = autoType(v)
 
-            providerObj.__dict__.update(providerSettings)
+            [providerObj.__dict__.update({x: providerSettings[x]}) for x in
+             set(providerObj.__dict__).intersection(providerSettings)]
+
+        # order providers
+        sickrage.srCore.providersDict.provider_order = self.check_setting_str('Providers', 'providers_order', [])
 
         # mark config settings loaded
         self.loaded = True
@@ -2004,6 +2035,7 @@ class srConfig(object):
         new_config['General']['create_missing_show_dirs'] = int(self.CREATE_MISSING_SHOW_DIRS)
         new_config['General']['add_shows_wo_dir'] = int(self.ADD_SHOWS_WO_DIR)
         new_config['General']['extra_scripts'] = '|'.join(self.EXTRA_SCRIPTS)
+        new_config['General']['pip_path'] = self.PIP_PATH
         new_config['General']['git_path'] = self.GIT_PATH
         new_config['General']['ignore_words'] = self.IGNORE_WORDS
         new_config['General']['require_words'] = self.REQUIRE_WORDS
@@ -2297,6 +2329,8 @@ class srConfig(object):
         new_config['Subtitles']['addic7ed_password'] = self.ADDIC7ED_PASS
         new_config['Subtitles']['legendastv_username'] = self.LEGENDASTV_USER
         new_config['Subtitles']['legendastv_password'] = self.LEGENDASTV_PASS
+        new_config['Subtitles']['itasa_username'] = self.ITASA_USER
+        new_config['Subtitles']['itasa_password'] = self.ITASA_PASS
         new_config['Subtitles']['opensubtitles_username'] = self.OPENSUBTITLES_USER
         new_config['Subtitles']['opensubtitles_password'] = self.OPENSUBTITLES_PASS
 
@@ -2313,17 +2347,21 @@ class srConfig(object):
         new_config['ANIME'] = {}
         new_config['ANIME']['anime_split_home'] = int(self.ANIME_SPLIT_HOME)
 
+        new_config['Quality'] = {}
+        new_config['Quality']['sizes'] = pickle.dumps(self.QUALITY_SIZES)
+
         new_config['Providers'] = {}
         new_config['Providers']['providers_order'] = sickrage.srCore.providersDict.provider_order
+        new_config['Providers']['custom_providers'] = self.CUSTOM_PROVIDERS
 
         provider_keys = ['enabled', 'confirmed', 'ranked', 'engrelease', 'onlyspasearch', 'sorting', 'options', 'ratio',
-                         'minseed', 'minleech', 'freeleech', 'search_mode', 'search_fallback', 'enable_daily',
+                         'minseed', 'minleech', 'freeleech', 'search_mode', 'search_fallback', 'enable_daily', 'key',
                          'enable_backlog', 'cat', 'subtitle', 'api_key', 'hash', 'digest', 'username', 'password',
-                         'passkey', 'pin']
+                         'passkey', 'pin', 'reject_m2ts', 'enable_cookies', 'cookies']
 
         for providerID, providerObj in sickrage.srCore.providersDict.all().items():
             new_config['Providers'][providerID] = dict(
-                [(x, providerObj.__dict__[x]) for x in provider_keys if x in providerObj.__dict__])
+                [(x, providerObj.__dict__[x]) for x in provider_keys if hasattr(providerObj, x)])
 
         # encrypt settings
         new_config.walk(self.encrypt)
@@ -2396,11 +2434,12 @@ class ConfigMigrator(srConfig):
         """
 
         if self.config_version > self.expected_config_version:
-            sickrage.srCore.srLogger.log_error_and_exit(
+            sickrage.srCore.srLogger.error(
                 """Your config version (%i) has been incremented past what this version of supports (%i).
                     If you have used other forks or a newer version of  your config file may be unusable due to their modifications.""" %
                 (self.config_version, self.expected_config_version)
             )
+            sys.exit(1)
 
         self.CONFIG_VERSION = self.config_version
 
@@ -2414,7 +2453,8 @@ class ConfigMigrator(srConfig):
 
             sickrage.srCore.srLogger.info("Backing up config before upgrade")
             if not backupVersionedFile(sickrage.CONFIG_FILE, self.config_version):
-                sickrage.srCore.srLogger.log_error_and_exit("Config backup failed, abort upgrading config")
+                sickrage.srCore.srLogger.exit("Config backup failed, abort upgrading config")
+                sys.exit(1)
             else:
                 sickrage.srCore.srLogger.info("Proceeding with upgrade")
 
@@ -2510,13 +2550,12 @@ class ConfigMigrator(srConfig):
             self.check_setting_int('General', 'NAMING_MULTI_EP_TYPE', 1))
 
         # see if any of their shows used season folders
-        season_folder_shows = main_db.MainDB().select("SELECT * FROM tv_shows WHERE flatten_folders = 0")
+        season_folder_shows = [x['doc'] for x in sickrage.srCore.mainDB.db.all('tv_shows', with_doc=True)
+                               if x['flatten_folders'] == 0]
 
         # if any shows had season folders on then prepend season folder to the pattern
         if season_folder_shows:
-
-            old_season_format = self.check_setting_str('General', 'season_folders_format',
-                                                       'Season %02d')
+            old_season_format = self.check_setting_str('General', 'season_folders_format', 'Season %02d')
 
             if old_season_format:
                 try:
@@ -2539,7 +2578,9 @@ class ConfigMigrator(srConfig):
                 "No shows were using season folders before so I'm disabling flattening on all shows")
 
             # don't flatten any shows at all
-            main_db.MainDB().action("UPDATE tv_shows SET flatten_folders = 0")
+            for dbData in [x['doc'] for x in sickrage.srCore.mainDB.db.all('tv_shows', with_doc=True)]:
+                dbData['flatten_folders'] = 0
+                sickrage.srCore.mainDB.db.update(dbData)
 
         self.CONFIG_OBJ['General']['naming_force_folders'] = check_force_season_folders()
 
@@ -2788,10 +2829,10 @@ class ConfigMigrator(srConfig):
                                                                        providerID + '_enable_daily',
                                                                        1))
 
-            if hasattr(providerObj, 'enable_backlog') and hasattr(providerObj, 'supportsBacklog'):
+            if hasattr(providerObj, 'enable_backlog') and hasattr(providerObj, 'supports_backlog'):
                 providerObj.enable_backlog = bool(self.check_setting_int(providerID.upper(),
                                                                          providerID + '_enable_backlog',
-                                                                         providerObj.supportsBacklog))
+                                                                         providerObj.supports_backlog))
 
             if hasattr(providerObj, 'cat'):
                 providerObj.cat = self.check_setting_int(providerID.upper(),
@@ -2823,10 +2864,10 @@ class ConfigMigrator(srConfig):
                                                                        providerID + '_enable_daily',
                                                                        1))
 
-            if hasattr(providerObj, 'enable_backlog') and hasattr(providerObj, 'supportsBacklog'):
+            if hasattr(providerObj, 'enable_backlog') and hasattr(providerObj, 'supports_backlog'):
                 providerObj.enable_backlog = bool(self.check_setting_int(providerID.upper(),
                                                                          providerID + '_enable_backlog',
-                                                                         providerObj.supportsBacklog))
+                                                                         providerObj.supports_backlog))
         return self.CONFIG_OBJ
 
     # Migration v9: Rename gui template name from slick to default

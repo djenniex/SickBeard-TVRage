@@ -1,22 +1,20 @@
-# -*- coding: utf-8 -*
-# Author: echel0n <tv@gmail.com>
-# URL: https://tv
-# Git: https://github.com/V/git
+# Author: echel0n <echel0n@sickrage.ca>
+# URL: https://sickrage.ca
 #
-# This file is part of 
+# This file is part of SickRage.
 #
-# is free software: you can redistribute it and/or modify
+# SickRage is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# is distributed in the hope that it will be useful,
+# SickRage is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 # GNU General Public License for more details.
 #
 # You should have received a copy of the GNU General Public License
-# along with   If not, see <http://www.gnu.org/licenses/>.
+# along with SickRage.  If not, see <http://www.gnu.org/licenses/>.
 
 from __future__ import unicode_literals
 
@@ -25,27 +23,29 @@ import os
 import re
 import shutil
 import socket
-import sys
 import threading
 import traceback
-
-import sickrage
+from multiprocessing import cpu_count
 
 from apscheduler.schedulers.tornado import TornadoScheduler
 from tornado.ioloop import IOLoop
 
+import sickrage
 from sickrage.core.caches.name_cache import srNameCache
 from sickrage.core.classes import AttrDict, srIntervalTrigger
 from sickrage.core.common import SD, SKIPPED, WANTED
-from sickrage.core.databases import main_db, cache_db, failed_db
+from sickrage.core.databases.cache import CacheDB
+from sickrage.core.databases.failed import FailedDB
+from sickrage.core.databases.main import MainDB
 from sickrage.core.google import googleAuth
 from sickrage.core.helpers import findCertainShow, \
-    generateCookieSecret, makeDir, removetree, get_lan_ip, restoreSR
+    generateCookieSecret, makeDir, removetree, get_lan_ip, restoreSR, getDiskSpaceUsage, getFreeSpace
 from sickrage.core.nameparser.validator import check_force_season_folders
 from sickrage.core.processors import auto_postprocessor
 from sickrage.core.processors.auto_postprocessor import srPostProcessor
 from sickrage.core.queues.search import srSearchQueue
 from sickrage.core.queues.show import srShowQueue
+from sickrage.core.scene_exceptions import retrieve_exceptions
 from sickrage.core.searchers.backlog_searcher import srBacklogSearcher, \
     get_backlog_cycle_time
 from sickrage.core.searchers.daily_searcher import srDailySearcher
@@ -87,13 +87,16 @@ from sickrage.notifiers.trakt import TraktNotifier
 from sickrage.notifiers.tweet import TwitterNotifier
 from sickrage.providers import providersDict
 
-
 class Core(object):
     def __init__(self):
         self.started = False
+        self.io_loop = IOLoop.current()
 
         # process id
         self.PID = os.getpid()
+
+        # cpu count
+        self.CPU_COUNT = cpu_count()
 
         # generate notifiers dict
         self.notifiersDict = AttrDict(
@@ -135,6 +138,11 @@ class Core(object):
 
         # init config
         self.srConfig = srConfig()
+
+        # init databases
+        self.mainDB = MainDB()
+        self.cacheDB = CacheDB()
+        self.failedDB = FailedDB()
 
         # init scheduler service
         self.srScheduler = TornadoScheduler()
@@ -201,7 +209,22 @@ class Core(object):
                                                       datetime.datetime.now().strftime(
                                                           '%Y%m%d_%H%M%S'))))
 
-            helpers.moveFile(os.path.abspath(os.path.join(sickrage.DATA_DIR, 'sickbeard.db')), os.path.abspath(os.path.join(sickrage.DATA_DIR, 'sickrage.db')))
+            helpers.moveFile(os.path.abspath(os.path.join(sickrage.DATA_DIR, 'sickbeard.db')),
+                             os.path.abspath(os.path.join(sickrage.DATA_DIR, 'sickrage.db')))
+
+        # perform database startup actions
+        for db in [self.mainDB, self.cacheDB, self.failedDB]:
+            # initialize database
+            db.initialize()
+
+            # check integrity of database
+            db.check_integrity()
+
+            # migrate database
+            db.migrate()
+
+            # compact database
+            db.compact()
 
         # load config
         self.srConfig.load()
@@ -212,35 +235,38 @@ class Core(object):
         # setup logger settings
         self.srLogger.logSize = self.srConfig.LOG_SIZE
         self.srLogger.logNr = self.srConfig.LOG_NR
+        self.srLogger.logFile = self.srConfig.LOG_FILE
         self.srLogger.debugLogging = sickrage.DEBUG
         self.srLogger.consoleLogging = not sickrage.QUITE
-        self.srLogger.logFile = self.srConfig.LOG_FILE
 
         # start logger
         self.srLogger.start()
 
-        # initialize the main SB database
-        main_db.MainDB().InitialSchema().upgrade()
-
-        # initialize the cache database
-        cache_db.CacheDB().InitialSchema().upgrade()
-
-        # initialize the failed downloads database
-        failed_db.FailedDB().InitialSchema().upgrade()
-
-        # fix up any db problems
-        main_db.MainDB().SanityCheck()
+        # Check available space
+        try:
+            total_space, available_space = getFreeSpace(sickrage.DATA_DIR)
+            if available_space < 100:
+                self.srLogger.error(
+                    'Shutting down as SiCKRAGE needs some space to work. You\'ll get corrupted data otherwise. Only %sMB left',
+                    available_space)
+                sickrage.restart = False
+                return
+        except:
+            self.srLogger.error('Failed getting diskspace: %s', traceback.format_exc())
 
         # load data for shows from database
         self.load_shows()
+
+        # build name cache
+        self.NAMECACHE.build()
 
         if self.srConfig.DEFAULT_PAGE not in ('home', 'schedule', 'history', 'news', 'IRC'):
             self.srConfig.DEFAULT_PAGE = 'home'
 
         # cleanup cache folder
-        for dir in ['mako', 'sessions', 'indexers']:
+        for folder in ['mako', 'sessions', 'indexers']:
             try:
-                shutil.rmtree(os.path.join(self.srConfig.CACHE_DIR, dir), ignore_errors=True)
+                shutil.rmtree(os.path.join(self.srConfig.CACHE_DIR, folder), ignore_errors=True)
             except Exception:
                 continue
 
@@ -326,22 +352,6 @@ class Core(object):
 
             self.metadataProviderDict[tmp_provider.name] = tmp_provider
 
-        # add show queue job
-        self.srScheduler.add_job(
-            self.SHOWQUEUE.run,
-            srIntervalTrigger(**{'seconds': 5}),
-            name="SHOWQUEUE",
-            id="SHOWQUEUE"
-        )
-
-        # add search queue job
-        self.srScheduler.add_job(
-            self.SEARCHQUEUE.run,
-            srIntervalTrigger(**{'seconds': 5}),
-            name="SEARCHQUEUE",
-            id="SEARCHQUEUE"
-        )
-
         # add version checker job
         self.srScheduler.add_job(
             self.VERSIONUPDATER.run,
@@ -382,7 +392,9 @@ class Core(object):
         self.srScheduler.add_job(
             self.DAILYSEARCHER.run,
             srIntervalTrigger(
-                **{'minutes': self.srConfig.DAILY_SEARCHER_FREQ, 'min': self.srConfig.MIN_DAILY_SEARCHER_FREQ}),
+                **{'minutes': self.srConfig.DAILY_SEARCHER_FREQ,
+                   'min': self.srConfig.MIN_DAILY_SEARCHER_FREQ,
+                   'start_date': datetime.datetime.now() + datetime.timedelta(minutes=4)}),
             name="DAILYSEARCHER",
             id="DAILYSEARCHER"
         )
@@ -392,7 +404,8 @@ class Core(object):
             self.BACKLOGSEARCHER.run,
             srIntervalTrigger(
                 **{'minutes': self.srConfig.BACKLOG_SEARCHER_FREQ,
-                   'min': self.srConfig.MIN_BACKLOG_SEARCHER_FREQ}),
+                   'min': self.srConfig.MIN_BACKLOG_SEARCHER_FREQ,
+                   'start_date': datetime.datetime.now() + datetime.timedelta(minutes=30)}),
             name="BACKLOG",
             id="BACKLOG"
         )
@@ -455,60 +468,52 @@ class Core(object):
          self.srScheduler.get_job('POSTPROCESSOR').resume
          )[self.srConfig.PROCESS_AUTOMATICALLY]()
 
+        # start queue's
+        self.SEARCHQUEUE.start()
+        self.SHOWQUEUE.start()
+
         # start webserver
         self.srWebServer.start()
 
         # start ioloop event handler
-        IOLoop.instance().start()
+        self.io_loop.start()
 
-    def shutdown(self, status=None, restart=False):
+    def shutdown(self):
         if self.started:
             self.started = False
 
-            if restart:
-                self.srLogger.info('SiCKRAGE IS PERFORMING A RESTART!')
-            else:
-                self.srLogger.info('SiCKRAGE IS PERFORMING A SHUTDOWN!')
+            self.srLogger.info('SiCKRAGE IS SHUTTING DOWN!!!')
 
             # shutdown/restart webserver
             self.srWebServer.shutdown()
 
             # shutdown scheduler
-            self.srLogger.info("Shutting down scheduler")
+            self.srLogger.debug("Shutting down scheduler")
             self.srScheduler.shutdown()
 
-            # shutdown queues
-            self.srLogger.info("Shutting down queues")
+            # shutdown show queue
             if self.SHOWQUEUE:
+                self.srLogger.debug("Shutting down show queue")
                 self.SHOWQUEUE.shutdown()
+
+            # shutdown search queue
             if self.SEARCHQUEUE:
+                self.srLogger.debug("Shutting down search queue")
                 self.SEARCHQUEUE.shutdown()
 
+            # log out of ADBA
             if sickrage.srCore.ADBA_CONNECTION:
-                self.srLogger.info("Logging out ANIDB connection")
+                self.srLogger.debug("Logging out ANIDB connection")
                 sickrage.srCore.ADBA_CONNECTION.logout()
 
-            # save all settings
+            # save all show and config settings
             self.save_all()
 
-            if restart:
-                self.srLogger.info('SiCKRAGE IS RESTARTING!')
-            else:
-                self.srLogger.info('SiCKRAGE IS SHUTDOWN!')
-
             # shutdown logging
-            self.srLogger.shutdown()
+            self.srLogger.close()
 
-        # delete pid file
-        if sickrage.DAEMONIZE:
-            sickrage.delpid(sickrage.PID_FILE)
-
-        # system exit with status
-        if not restart:
-            sys.exit(status)
-
-        # stop ioloop event handler
-        IOLoop.current().stop()
+        # stop daemon process
+        if not sickrage.restart and sickrage.daemon: sickrage.daemon.stop()
 
     def save_all(self):
         # write all shows
@@ -527,14 +532,11 @@ class Core(object):
         Populates the showlist with shows from the database
         """
 
-        for sqlShow in main_db.MainDB().select("SELECT * FROM tv_shows"):
+        for dbData in [x['doc'] for x in self.mainDB.db.all('tv_shows', with_doc=True)]:
             try:
-                curshow = TVShow(int(sqlShow["indexer"]), int(sqlShow["indexer_id"]))
-                self.srLogger.debug("Loading data for show: [{}]".format(curshow.name))
-                #self.NAMECACHE.buildNameCache(curshow)
-                curshow.nextEpisode()
-                self.SHOWLIST += [curshow]
+                self.srLogger.debug("Loading data for show: [%s]", dbData['show_name'])
+                show = TVShow(int(dbData['indexer']), int(dbData['indexer_id']))
+                show.nextEpisode()
+                self.SHOWLIST += [show]
             except Exception as e:
-                self.srLogger.error(
-                    "There was an error creating the show in {}: {}".format(sqlShow["location"], e.message))
-                self.srLogger.debug(traceback.format_exc())
+                self.srLogger.error("Show error in [%s]: %s" % (dbData['location'], e.message))

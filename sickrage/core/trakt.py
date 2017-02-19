@@ -1,8 +1,8 @@
-#!/usr/bin/env python2
+
 
 # Author: echel0n <echel0n@sickrage.ca>
-# URL: https://sickrage.tv/
-# Git: https://github.com/SiCKRAGETV/SickRage.git
+# URL: https://sickrage.ca
+# Git: https://git.sickrage.ca/SiCKRAGE/sickrage.git
 #
 # This file is part of SickRage.
 #
@@ -32,7 +32,6 @@ import sickrage
 
 class TraktAPI():
     def __init__(self, ssl_verify=True, timeout=30):
-        self.session = sickrage.srCore.srWebSession
         self.timeout = timeout if timeout else None
         self.auth_url = sickrage.srCore.srConfig.TRAKT_OAUTH_URL
         self.api_url = sickrage.srCore.srConfig.TRAKT_API_URL
@@ -90,7 +89,7 @@ class TraktAPI():
         if None == url:
             url = self.api_url
 
-        count = count + 1
+        count += 1
 
         if None == headers:
             headers = self.headers
@@ -102,13 +101,13 @@ class TraktAPI():
         headers['Authorization'] = 'Bearer ' + sickrage.srCore.srConfig.TRAKT_ACCESS_TOKEN
 
         try:
-            resp = self.session.request(method, url + path,
+            resp = sickrage.srCore.srWebSession.request(method, url + path,
                                         headers=headers,
                                         timeout=self.timeout,
                                         data=json.dumps(data) if data else [])
 
             # check for http errors and raise if any are present
-            #resp.raise_for_status()
+            resp.raise_for_status()
 
             # convert response to json
             resp = resp.json()

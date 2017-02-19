@@ -1,7 +1,6 @@
-#!/usr/bin/env python2
-
+#!/usr/bin/env python2.7
 # Author: echel0n <echel0n@sickrage.ca>
-# URL: https://git.sickrage.ca
+# URL: https://sickrage.ca
 #
 # This file is part of SickRage.
 #
@@ -196,12 +195,9 @@ def main():
     if nzbName and os.path.isdir(os.path.join(dirName, nzbName)):
         dirName = os.path.join(dirName, nzbName)
 
-    params = {}
+    params = {'quiet': 1, 'dir': dirName}
 
-    params['quiet'] = 1
-
-    params['dir'] = dirName
-    if nzbName != None:
+    if nzbName is not None:
         params['nzbName'] = nzbName
 
     if ssl:
@@ -227,7 +223,7 @@ def main():
         scriptlogger.error('Invalid SiCKRAGE Username or Password, check your config')
         sys.exit('Invalid SiCKRAGE Username or Password, check your config')
 
-    if response.status_code == 200:
+    if response.ok:
         scriptlogger.info('Script ' + __file__ + ' Succesfull')
         print('Script ' + __file__ + ' Succesfull')
         sys.exit()

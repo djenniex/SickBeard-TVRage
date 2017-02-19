@@ -1,5 +1,5 @@
 # Author: echel0n <echel0n@sickrage.ca>
-# URL: http://github.com/SiCKRAGETV/SickRage/
+# URL: https://sickrage.ca
 #
 # This file is part of SickRage.
 #
@@ -27,6 +27,7 @@ import traceback
 import urllib
 
 import markdown2
+from CodernityDB.database import RecordNotFound
 from UnRAR2 import RarFile
 from dateutil import tz
 from mako.exceptions import html_error_template, RichTraceback
@@ -34,7 +35,6 @@ from mako.lookup import TemplateLookup
 from tornado.concurrent import run_on_executor
 from tornado.escape import json_encode, recursive_unicode, json_decode
 from tornado.gen import coroutine
-from tornado.ioloop import IOLoop
 from tornado.web import RequestHandler, authenticated
 
 try:
@@ -51,11 +51,9 @@ from sickrage.core.classes import ErrorViewer, AllShowsListUI, AttrDict
 from sickrage.core.classes import WarningViewer
 from sickrage.core.common import FAILED, IGNORED, Overview, Quality, SKIPPED, \
     SNATCHED, UNAIRED, WANTED, cpu_presets, statusStrings
-from sickrage.core.databases import failed_db, main_db
 from sickrage.core.exceptions import CantRefreshShowException, \
     CantUpdateShowException, EpisodeDeletedException, \
-    MultipleShowObjectsException, NoNFOException, \
-    ShowDirectoryNotFoundException
+    MultipleShowObjectsException, NoNFOException
 from sickrage.core.helpers import argToBool, backupSR, check_url, \
     chmodAsParent, findCertainShow, generateApiKey, getDiskSpaceUsage, get_lan_ip, makeDir, readFileBuffered, \
     remove_article, restoreConfigZip, \
@@ -67,8 +65,7 @@ from sickrage.core.nameparser import validator
 from sickrage.core.process_tv import processDir
 from sickrage.core.queues.search import BacklogQueueItem, FailedQueueItem, \
     MANUAL_SEARCH_HISTORY, ManualSearchQueueItem
-from sickrage.core.scene_exceptions import get_all_scene_exceptions, \
-    get_scene_exceptions, update_scene_exceptions
+from sickrage.core.scene_exceptions import get_scene_exceptions, update_scene_exceptions
 from sickrage.core.scene_numbering import get_scene_absolute_numbering, \
     get_scene_absolute_numbering_for_show, get_scene_numbering, \
     get_scene_numbering_for_show, get_xem_absolute_numbering_for_show, \
@@ -90,10 +87,13 @@ class BaseHandler(RequestHandler):
     def __init__(self, application, request, **kwargs):
         super(BaseHandler, self).__init__(application, request, **kwargs)
 
+        self.io_loop = sickrage.srCore.io_loop
+        self.executor = ThreadPoolExecutor(sickrage.srCore.CPU_COUNT)
+
         # template settings
         self.mako_lookup = TemplateLookup(
-            directories=[os.path.join(sickrage.srCore.srConfig.GUI_DIR, 'views{}'.format(os.sep))],
-            module_directory=os.path.join(sickrage.srCore.srConfig.CACHE_DIR, 'mako{}'.format(os.sep)),
+            directories=[os.path.join(sickrage.srCore.srConfig.GUI_DIR, 'views')],
+            module_directory=os.path.join(sickrage.srCore.srConfig.CACHE_DIR, 'mako'),
             format_exceptions=False,
             strict_undefined=True,
             input_encoding='utf-8',
@@ -105,9 +105,9 @@ class BaseHandler(RequestHandler):
         # start time
         self.startTime = time.time()
 
-    def initialize(self):
-        self.io_loop = IOLoop.current()
-        self.executor = ThreadPoolExecutor(max_workers=10)
+    def prepare(self):
+        if not self.request.full_url().startswith(sickrage.srCore.srConfig.WEB_ROOT):
+            self.redirect("{}{}".format(sickrage.srCore.srConfig.WEB_ROOT, self.request.full_url()))
 
     def write_error(self, status_code, **kwargs):
         # handle 404 http errors
@@ -147,10 +147,12 @@ class BaseHandler(RequestHandler):
                                </html>""".format(error, error, trace_info, request_info,
                                                  sickrage.srCore.srConfig.WEB_ROOT))
 
-    def redirect(self, url, *args, **kwargs):
+    def redirect(self, url, permanent=False, status=None):
         if not url.startswith(sickrage.srCore.srConfig.WEB_ROOT):
             url = sickrage.srCore.srConfig.WEB_ROOT + url
-        super(BaseHandler, self).redirect(url, *args, **kwargs)
+            permanent = True
+
+        super(BaseHandler, self).redirect(url, permanent, status)
 
     def get_current_user(self):
         return self.get_secure_cookie('user')
@@ -212,11 +214,14 @@ class WebHandler(BaseHandler):
     @authenticated
     def prepare(self, *args, **kwargs):
         # route -> method obj
-        method = getattr(self, self.request.path.strip('/').split('/')[::-1][0].replace('.', '_'),
-                         getattr(self, 'index'))
+        method = getattr(
+            self, self.request.path.strip('/').split('/')[::-1][0].replace('.', '_'),
+            getattr(self, 'index', None)
+        )
 
-        result = yield self.callback(method, **self.request.arguments)
-        self.finish(result)
+        if method:
+            result = yield self.callback(method, **self.request.arguments)
+            self.finish(result)
 
 
 class LoginHandler(BaseHandler):
@@ -225,10 +230,10 @@ class LoginHandler(BaseHandler):
 
     @coroutine
     def prepare(self, *args, **kwargs):
-        result = yield self.callback(self.checkAuth)
+        result = yield self.callback(self.auth)
         self.finish(result)
 
-    def checkAuth(self):
+    def auth(self):
         try:
             username = self.get_argument('username', '')
             password = self.get_argument('password', '')
@@ -239,7 +244,8 @@ class LoginHandler(BaseHandler):
                 self.set_secure_cookie('user', json_encode(sickrage.srCore.srConfig.API_KEY),
                                        expires_days=30 if remember_me > 0 else None)
                 sickrage.srCore.srLogger.debug('User logged into the SiCKRAGE web interface')
-                return self.redirect(self.get_argument("next", "/"))
+
+                return self.redirect(self.get_argument("next","/{}/".format(sickrage.srCore.srConfig.DEFAULT_PAGE)))
             elif username and password:
                 sickrage.srCore.srLogger.warning(
                     'User attempted a failed login to the SiCKRAGE web interface from IP: {}'.format(
@@ -266,7 +272,7 @@ class LogoutHandler(BaseHandler):
 
     def prepare(self, *args, **kwargs):
         self.clear_cookie("user")
-        return self.redirect(self.get_argument("next", "/"))
+        return self.redirect('/login/')
 
 
 class CalendarHandler(BaseHandler):
@@ -288,6 +294,8 @@ class CalendarHandler(BaseHandler):
         """ Provides a subscribeable URL for iCal subscriptions
         """
 
+        utc = tz.gettz('GMT')
+
         sickrage.srCore.srLogger.info("Receiving iCal request from %s" % self.request.remote_ip)
 
         # Create a iCal string
@@ -302,22 +310,17 @@ class CalendarHandler(BaseHandler):
         future_date = (datetime.date.today() + datetime.timedelta(weeks=52)).toordinal()
 
         # Get all the shows that are not paused and are currently on air (from kjoconnor Fork)
-        calendar_shows = main_db.MainDB().select(
-            "SELECT show_name, indexer_id, network, airs, runtime FROM tv_shows WHERE ( status = 'Continuing' OR status = 'Returning Series' ) AND paused != '1'")
-        for show in calendar_shows:
-            # Get all episodes of this show airing between today and next month
-            episode_list = main_db.MainDB().select(
-                "SELECT indexerid, name, season, episode, description, airdate FROM tv_episodes WHERE airdate >= ? AND airdate < ? AND showid = ?",
-                (past_date, future_date, int(show["indexer_id"])))
+        for show in [x['doc'] for x in sickrage.srCore.mainDB.db.all('tv_shows', with_doc=True)
+                     if x['doc']['status'].lower() in ['continuing', 'returning series']
+                     and x['doc']['paused'] != 1]:
+            for episode in [x['doc'] for x in
+                            sickrage.srCore.mainDB.db.get_many('tv_episodes', int(show['indexer_id']), with_doc=True) if
+                            past_date <= x['doc']['airdate'] < future_date]:
 
-            utc = tz.gettz('GMT')
-
-            for episode in episode_list:
-
-                air_date_time = tz_updater.parse_date_time(episode['airdate'], show["airs"],
+                air_date_time = tz_updater.parse_date_time(episode['airdate'], show['airs'],
                                                            show['network']).astimezone(utc)
-                air_date_time_end = air_date_time + datetime.timedelta(
-                    minutes=tryInt(show["runtime"], 60))
+
+                air_date_time_end = air_date_time + datetime.timedelta(minutes=tryInt(show['runtime'], 60))
 
                 # Create event for episode
                 ical += 'BEGIN:VEVENT\r\n'
@@ -327,7 +330,7 @@ class CalendarHandler(BaseHandler):
                     "%Y%m%d") + 'T' + air_date_time_end.strftime(
                     "%H%M%S") + 'Z\r\n'
                 if sickrage.srCore.srConfig.CALENDAR_ICONS:
-                    ical += 'X-GOOGLE-CALENDAR-CONTENT-ICON:http://www.sickrage.ca/favicon.ico\r\n'
+                    ical += 'X-GOOGLE-CALENDAR-CONTENT-ICON:https://www.sickrage.ca/favicon.ico\r\n'
                     ical += 'X-GOOGLE-CALENDAR-CONTENT-DISPLAY:CHIP\r\n'
                 ical += 'SUMMARY: {0} - {1}x{2} - {3}\r\n'.format(
                     show['show_name'], episode['season'], episode['episode'], episode['name']
@@ -352,7 +355,7 @@ class CalendarHandler(BaseHandler):
         return ical
 
 
-@Route('(.*)(/?)')
+@Route('(.*)(/?.*)')
 class WebRoot(WebHandler):
     def __init__(self, *args, **kwargs):
         super(WebRoot, self).__init__(*args, **kwargs)
@@ -369,17 +372,12 @@ class WebRoot(WebHandler):
         def titler(x):
             return (remove_article(x), x)[not x or sickrage.srCore.srConfig.SORT_ARTICLE]
 
-        myDB = main_db.MainDB(row_type='dict')
         shows = sorted(sickrage.srCore.SHOWLIST, lambda x, y: cmp(titler(x.name), titler(y.name)))
         episodes = {}
 
-        results = myDB.select(
-            'SELECT episode, season, showid '
-            'FROM tv_episodes '
-            'ORDER BY season ASC, episode ASC'
-        )
+        for result in sorted([x['doc'] for x in sickrage.srCore.mainDB.db.all('tv_episodes')],
+                             key=lambda d: (d['season'], d['episode'])):
 
-        for result in results:
             if result['showid'] not in episodes:
                 episodes[result['showid']] = {}
 
@@ -531,7 +529,7 @@ class WebRoot(WebHandler):
 
 
 @Route('/google(/?.*)')
-class GoogleAuth(WebRoot):
+class GoogleAuth(WebHandler):
     def __init__(self, *args, **kwargs):
         super(GoogleAuth, self).__init__(*args, **kwargs)
 
@@ -554,7 +552,7 @@ class GoogleAuth(WebRoot):
 
 
 @Route('/ui(/?.*)')
-class UI(WebRoot):
+class UI(WebHandler):
     def __init__(self, *args, **kwargs):
         super(UI, self).__init__(*args, **kwargs)
         self.set_header('Cache-Control', 'max-age=0,no-cache,no-store')
@@ -582,7 +580,7 @@ class UI(WebRoot):
 
 
 @Route('/browser(/?.*)')
-class WebFileBrowser(WebRoot):
+class WebFileBrowser(WebHandler):
     def __init__(self, *args, **kwargs):
         super(WebFileBrowser, self).__init__(*args, **kwargs)
 
@@ -601,7 +599,7 @@ class WebFileBrowser(WebRoot):
 
 
 @Route('/home(/?.*)')
-class Home(WebRoot):
+class Home(WebHandler):
     def __init__(self, *args, **kwargs):
         super(Home, self).__init__(*args, **kwargs)
 
@@ -669,34 +667,43 @@ class Home(WebRoot):
 
     @staticmethod
     def show_statistics():
-        today = str(datetime.date.today().toordinal())
-
-        status_quality = '(' + ','.join([str(x) for x in Quality.SNATCHED + Quality.SNATCHED_PROPER]) + ')'
-        status_download = '(' + ','.join([str(x) for x in Quality.DOWNLOADED + Quality.ARCHIVED]) + ')'
-
-        sql_statement = 'SELECT showid, '
-
-        sql_statement += '(SELECT COUNT(*) FROM tv_episodes WHERE showid=tv_eps.showid AND season > 0 AND episode > 0 AND airdate > 1 AND status IN ' + status_quality + ') AS ep_snatched, '
-        sql_statement += '(SELECT COUNT(*) FROM tv_episodes WHERE showid=tv_eps.showid AND season > 0 AND episode > 0 AND airdate > 1 AND status IN ' + status_download + ') AS ep_downloaded, '
-        sql_statement += '(SELECT COUNT(*) FROM tv_episodes WHERE showid=tv_eps.showid AND season > 0 AND episode > 0 AND airdate > 1 '
-        sql_statement += ' AND ((airdate <= ' + today + ' AND (status = ' + str(SKIPPED) + ' OR status = ' + str(
-            WANTED) + ' OR status = ' + str(FAILED) + ')) '
-        sql_statement += ' OR (status IN ' + status_quality + ') OR (status IN ' + status_download + '))) AS ep_total, '
-
-        sql_statement += ' (SELECT airdate FROM tv_episodes WHERE showid=tv_eps.showid AND airdate >= ' + today + ' AND (status = ' + str(
-            UNAIRED) + ' OR status = ' + str(WANTED) + ') ORDER BY airdate ASC LIMIT 1) AS ep_airs_next, '
-        sql_statement += ' (SELECT airdate FROM tv_episodes WHERE showid=tv_eps.showid AND airdate > 1 AND status <> ' + str(
-            UNAIRED) + ' ORDER BY airdate DESC LIMIT 1) AS ep_airs_prev '
-        sql_statement += ' FROM tv_episodes tv_eps GROUP BY showid'
-
-        sql_result = main_db.MainDB().select(sql_statement)
-
         show_stat = {}
+
+        today = datetime.date.today().toordinal()
+
+        status_quality = Quality.SNATCHED + Quality.SNATCHED_PROPER + Quality.SNATCHED_BEST
+        status_download = Quality.DOWNLOADED + Quality.ARCHIVED
+
         max_download_count = 1000
-        for cur_result in sql_result:
-            show_stat[cur_result['showid']] = cur_result
-            if cur_result['ep_total'] > max_download_count:
-                max_download_count = cur_result['ep_total']
+
+        for dbData in sickrage.srCore.mainDB.db.all('tv_episodes', with_doc=True):
+            showid = dbData['doc']['showid']
+            if showid not in show_stat:
+                show_stat[showid] = {}
+                show_stat[showid]['ep_snatched'] = 0
+                show_stat[showid]['ep_downloaded'] = 0
+                show_stat[showid]['ep_total'] = 0
+                show_stat[showid]['ep_airs_next'] = None
+                show_stat[showid]['ep_airs_prev'] = None
+
+            season = dbData['doc']['season']
+            episode = dbData['doc']['episode']
+            airdate = dbData['doc']['airdate']
+            status = dbData['doc']['status']
+
+            if season > 0 and episode > 0 and airdate > 1:
+                if status in status_quality: show_stat[showid]['ep_snatched'] += 1
+                if status in status_download: show_stat[showid]['ep_downloaded'] += 1
+                if (airdate <= today and status in [SKIPPED, WANTED, FAILED]
+                    ) or (status in status_quality + status_download): show_stat[showid]['ep_total'] += 1
+
+                if airdate >= today and status in [WANTED, UNAIRED] and not show_stat[showid]['ep_airs_next']:
+                    show_stat[showid]['ep_airs_next'] = airdate
+                elif airdate < today and status != UNAIRED and airdate > show_stat[showid]['ep_airs_prev']:
+                    show_stat[showid]['ep_airs_prev'] = airdate
+
+                if show_stat[showid]['ep_total'] > max_download_count:
+                    max_download_count = show_stat[showid]['ep_total']
 
         max_download_count *= 100
 
@@ -987,28 +994,29 @@ class Home(WebRoot):
 
     @staticmethod
     def loadShowNotifyLists():
-
-        rows = main_db.MainDB().select("SELECT show_id, show_name, notify_list FROM tv_shows ORDER BY show_name ASC")
-
         data = {}
         size = 0
-        for r in rows:
-            data[r['show_id']] = {'id': r['show_id'], 'name': r['show_name'], 'list': r['notify_list']}
+
+        tv_shows = sorted([x['doc'] for x in sickrage.srCore.mainDB.db.all('tv_shows', with_doc=True)], key=lambda d: d['show_name'])
+
+        for s in tv_shows:
+            data[s['show_id']] = {'id': s['show_id'], 'name': s['show_name'], 'list': s['notify_list']}
             size += 1
         data['_size'] = size
+
         return json_encode(data)
 
     @staticmethod
     def saveShowNotifyList(show=None, emails=None):
-
-        if main_db.MainDB().action("UPDATE tv_shows SET notify_list = ? WHERE show_id = ?", [emails, show]):
-            return 'OK'
-        else:
+        try:
+            dbData = sickrage.srCore.mainDB.db.get('tv_shows', int(show), with_doc=True)['doc']
+            dbData['notify_list'] = emails
+            sickrage.srCore.mainDB.db.update(dbData)
+        except RecordNotFound:
             return 'ERROR'
 
     @staticmethod
     def testEmail(host=None, port=None, smtp_from=None, use_tls=None, user=None, pwd=None, to=None):
-
         host = sickrage.srCore.srConfig.clean_host(host)
         if sickrage.srCore.notifiersDict.email_notifier.test_notify(host, port, smtp_from, use_tls, user, pwd, to):
             return 'Test email sent successfully! Check inbox.'
@@ -1026,7 +1034,6 @@ class Home(WebRoot):
 
     @staticmethod
     def testPushalot(authorizationToken=None):
-
         result = sickrage.srCore.notifiersDict.pushalot_notifier.test_notify(authorizationToken)
         if result:
             return "Pushalot notification succeeded. Check your Pushalot clients to make sure it worked"
@@ -1035,7 +1042,6 @@ class Home(WebRoot):
 
     @staticmethod
     def testPushbullet(api=None):
-
         result = sickrage.srCore.notifiersDict.pushbullet_notifier.test_notify(api)
         if result:
             return "Pushbullet notification succeeded. Check your device to make sure it worked"
@@ -1044,8 +1050,6 @@ class Home(WebRoot):
 
     @staticmethod
     def getPushbulletDevices(api=None):
-        # self.set_header('Cache-Control', 'max-age=0,no-cache,no-store')
-
         result = sickrage.srCore.notifiersDict.pushbullet_notifier.get_devices(api)
         if result:
             return result
@@ -1078,20 +1082,18 @@ class Home(WebRoot):
 
     def shutdown(self, pid=None):
         if str(pid) != str(sickrage.srCore.PID):
-            return self.redirect('/home/')
+            return self.redirect('/' + sickrage.srCore.srConfig.DEFAULT_PAGE + '/')
 
         self._genericMessage("Shutting down", "SiCKRAGE is shutting down")
-        sickrage.srCore.shutdown()
+        sickrage.restart = False
+        sickrage.srCore.io_loop.stop()
 
     def restart(self, pid=None):
         if str(pid) != str(sickrage.srCore.PID):
-            return self.redirect('/home/')
+            return self.redirect('/' + sickrage.srCore.srConfig.DEFAULT_PAGE + '/')
 
         self._genericMessage("Restarting", "SiCKRAGE is restarting")
-
-        self.io_loop.add_timeout(
-            datetime.timedelta(seconds=10),
-            lambda: sickrage.srCore.shutdown(restart=True))
+        self.io_loop.add_timeout(datetime.timedelta(seconds=10), sickrage.srCore.io_loop.stop)
 
         return self.render(
             "/home/restart.mako",
@@ -1104,7 +1106,7 @@ class Home(WebRoot):
 
     def updateCheck(self, pid=None):
         if str(pid) != str(sickrage.srCore.PID):
-            return self.redirect('/home/')
+            return self.redirect('/' + sickrage.srCore.srConfig.DEFAULT_PAGE + '/')
 
         # check for news updates
         sickrage.srCore.VERSIONUPDATER.check_for_new_news()
@@ -1120,15 +1122,12 @@ class Home(WebRoot):
 
     def update(self, pid=None):
         if str(pid) != str(sickrage.srCore.PID):
-            return self.redirect('/home/')
+            return self.redirect('/' + sickrage.srCore.srConfig.DEFAULT_PAGE + '/')
 
-        if sickrage.srCore.VERSIONUPDATER._runbackup() is True:
-            if sickrage.srCore.VERSIONUPDATER.update():
-                return self.restart(pid)
-            else:
-                return self._genericMessage("Update Failed",
-                                            "Update wasn't successful, not restarting. Check your log for more information.")
+        if sickrage.srCore.VERSIONUPDATER.update():
+            return self.restart(pid)
         else:
+            sickrage.srCore.srNotifications.message("Update wasn't successful, not restarting. Check your log for more information.")
             return self.redirect('/' + sickrage.srCore.srConfig.DEFAULT_PAGE + '/')
 
     def branchCheckout(self, branch):
@@ -1152,23 +1151,16 @@ class Home(WebRoot):
             if showObj is None:
                 return self._genericMessage("Error", "Show not in show list")
 
-        seasonResults = main_db.MainDB().select(
-            "SELECT DISTINCT season FROM tv_episodes WHERE showid = ? ORDER BY season DESC",
-            [showObj.indexerid]
-        )
+        episodeResults = sorted(
+            [x['doc'] for x in sickrage.srCore.mainDB.db.get_many('tv_episodes', showObj.indexerid, with_doc=True)],
+            key=lambda d: (d['season'], d['episode']), reverse=True)
 
-        episodeResults = main_db.MainDB().select(
-            "SELECT * FROM tv_episodes WHERE showid = ? ORDER BY season DESC, episode DESC",
-            [showObj.indexerid]
-        )
+        seasonResults = list({x['season'] for x in episodeResults})
 
         submenu = [
             {'title': 'Edit', 'path': '/home/editShow?show=%d' % showObj.indexerid, 'icon': 'ui-icon ui-icon-pencil'}]
 
-        try:
-            showLoc = (showObj.location, True)
-        except ShowDirectoryNotFoundException:
-            showLoc = (showObj.location, False)
+        showLoc = showObj.location
 
         show_message = ''
 
@@ -1232,9 +1224,9 @@ class Home(WebRoot):
         epCounts[Overview.SNATCHED] = 0
 
         for curEp in episodeResults:
-            curEpCat = showObj.getOverview(int(curEp["status"] or -1))
+            curEpCat = showObj.getOverview(int(curEp['status'] or -1))
             if curEpCat:
-                epCats[str(curEp["season"]) + "x" + str(curEp["episode"])] = curEpCat
+                epCats[str(curEp['season']) + "x" + str(curEp['episode'])] = curEpCat
                 epCounts[curEpCat] += 1
 
         def titler(x):
@@ -1248,6 +1240,7 @@ class Home(WebRoot):
                     anime.append(show)
                 else:
                     shows.append(show)
+
             sortedShowLists = [["Shows", sorted(shows, lambda x, y: cmp(titler(x.name), titler(y.name)))],
                                ["Anime", sorted(anime, lambda x, y: cmp(titler(x.name), titler(y.name)))]]
         else:
@@ -1298,30 +1291,6 @@ class Home(WebRoot):
             controller='home',
             action="display_show"
         )
-
-    @staticmethod
-    def plotDetails(show, season, episode):
-
-        try:
-            result = main_db.MainDB().select(
-                "SELECT description FROM tv_episodes WHERE showid = ? AND season = ? AND episode = ?",
-                (int(show), int(season), int(episode)))[0]['description']
-        except:
-            result = 'Episode not found.'
-        return result
-
-    @staticmethod
-    def sceneExceptions(show):
-        exceptionsList = get_all_scene_exceptions(show)
-        if not exceptionsList:
-            return "No scene exceptions"
-
-        out = []
-        for season, names in iter(sorted(exceptionsList.items())):
-            if season == -1:
-                season = "*"
-            out.append("S" + str(season) + ": " + ", ".join(names))
-        return "<br>".join(out)
 
     def editShow(self, show=None, location=None, anyQualities=None, bestQualities=None, exceptions_list=None,
                  flatten_folders=None, paused=None, directCall=False, air_by_date=None, sports=None, dvdorder=None,
@@ -1410,8 +1379,7 @@ class Home(WebRoot):
         anime = sickrage.srCore.srConfig.checkbox_to_value(anime)
         subtitles = sickrage.srCore.srConfig.checkbox_to_value(subtitles)
 
-        if indexerLang and indexerLang in srIndexerApi(showObj.indexer).indexer().config[
-            'valid_languages']:
+        if indexerLang and indexerLang in srIndexerApi(showObj.indexer).indexer().languages.keys():
             indexer_lang = indexerLang
         else:
             indexer_lang = showObj.lang
@@ -1497,7 +1465,7 @@ class Home(WebRoot):
             if os.path.normpath(showObj.location) != os.path.normpath(location):
                 sickrage.srCore.srLogger.debug(os.path.normpath(showObj.location) + " != " + os.path.normpath(location))
                 if not os.path.isdir(location) and not sickrage.srCore.srConfig.CREATE_MISSING_SHOW_DIRS:
-                    errors.append("New location <tt>%s</tt> does not exist" % location)
+                    errors.append("New location <tt>{}</tt> does not exist".format(location))
 
                 # don't bother if we're going to update anyway
                 elif not do_update:
@@ -1618,7 +1586,7 @@ class Home(WebRoot):
 
         return self.redirect("/home/displayShow?show=" + str(showObj.indexerid))
 
-    def subtitleShow(self, show=None, force=0):
+    def subtitleShow(self, show=None):
 
         if show is None:
             return self._genericMessage("Error", "Invalid show ID")
@@ -1629,7 +1597,7 @@ class Home(WebRoot):
             return self._genericMessage("Error", "Unable to find the specified show")
 
         # search and download subtitles
-        sickrage.srCore.SHOWQUEUE.downloadSubtitles(showObj, bool(force))
+        sickrage.srCore.SHOWQUEUE.downloadSubtitles(showObj)
 
         time.sleep(cpu_presets[sickrage.srCore.srConfig.CPU_PRESET])
 
@@ -1764,7 +1732,6 @@ class Home(WebRoot):
         segments = {}
         trakt_data = []
         if eps:
-            sql_l = []
             for curEp in eps.split('|'):
 
                 if not curEp:
@@ -1819,10 +1786,8 @@ class Home(WebRoot):
 
                     epObj.status = int(status)
 
-                    # mass add to database
-                    sql_q = epObj.saveToDB(False)
-                    if sql_q:
-                        sql_l.append(sql_q)
+                    # save to database
+                    epObj.saveToDB()
 
                     trakt_data.append((epObj.season, epObj.episode))
 
@@ -1840,10 +1805,6 @@ class Home(WebRoot):
                             showObj.name) + " from Watchlist")
                     sickrage.srCore.notifiersDict.trakt_notifier.update_watchlist(showObj, data_episode=data,
                                                                                   update="remove")
-
-            if len(sql_l) > 0:
-                main_db.MainDB().mass_upsert(sql_l)
-                del sql_l  # cleanup
 
         if int(status) == WANTED and not showObj.paused:
             msg = "Backlog was automatically started for the following seasons of <b>" + showObj.name + "</b>:<br>"
@@ -1895,9 +1856,7 @@ class Home(WebRoot):
         if showObj is None:
             return self._genericMessage("Error", "Show not in show list")
 
-        try:
-            showObj.location  # @UnusedVariable
-        except ShowDirectoryNotFoundException:
+        if not os.path.isdir(showObj.location):
             return self._genericMessage("Error", "Can't rename episodes when the show dir is missing.")
 
         ep_obj_rename_list = []
@@ -1948,9 +1907,7 @@ class Home(WebRoot):
             errMsg = "Error", "Show not in show list"
             return self._genericMessage("Error", errMsg)
 
-        try:
-            show_obj.location  # @UnusedVariable
-        except ShowDirectoryNotFoundException:
+        if not os.path.isdir(show_obj.location):
             return self._genericMessage("Error", "Can't rename episodes when the show dir is missing.")
 
         if eps is None:
@@ -1960,16 +1917,16 @@ class Home(WebRoot):
 
             epInfo = curEp.split('x')
 
-            # this is probably the worst possible way to deal with double eps but I've kinda painted myself into a corner here with this stupid database
-            ep_result = main_db.MainDB().select(
-                "SELECT * FROM tv_episodes WHERE showid = ? AND season = ? AND episode = ? AND 5=5",
-                [show, epInfo[0], epInfo[1]])
+            ep_result = [x['doc'] for x in sickrage.srCore.mainDB.db.get_many('tv_episodes', int(show), with_doc=True)
+                         if x['doc']['season'] == int(epInfo[0]) and x['doc']['episode'] == int(epInfo[1])]
+
             if not ep_result:
                 sickrage.srCore.srLogger.warning("Unable to find an episode for " + curEp + ", skipping")
                 continue
-            related_eps_result = main_db.MainDB().select(
-                "SELECT * FROM tv_episodes WHERE location = ? AND episode != ?",
-                [ep_result[0]["location"], epInfo[1]])
+
+            related_eps_result = [x['doc'] for x in sickrage.srCore.mainDB.db.all('tv_episodes', with_doc=True)
+                                  if x['doc']['location'] == ep_result[0]['location']
+                                  and x['doc']['episode'] != int(epInfo[1])]
 
             root_ep_obj = show_obj.getEpisode(int(epInfo[0]), int(epInfo[1]))
             root_ep_obj.relatedEps = []
@@ -2209,7 +2166,7 @@ class Home(WebRoot):
 
 
 @Route('/IRC(/?.*)')
-class irc(WebRoot):
+class irc(WebHandler):
     def __init__(self, *args, **kwargs):
         super(irc, self).__init__(*args, **kwargs)
 
@@ -2225,7 +2182,7 @@ class irc(WebRoot):
 
 
 @Route('/news(/?.*)')
-class news(WebRoot):
+class news(WebHandler):
     def __init__(self, *args, **kwargs):
         super(news, self).__init__(*args, **kwargs)
 
@@ -2256,7 +2213,7 @@ class news(WebRoot):
 
 
 @Route('/changes(/?.*)')
-class changelog(WebRoot):
+class changelog(WebHandler):
     def __init__(self, *args, **kwargs):
         super(changelog, self).__init__(*args, **kwargs)
 
@@ -2332,9 +2289,7 @@ class HomeAddShows(Home):
 
     @staticmethod
     def getIndexerLanguages():
-        result = srIndexerApi().config['valid_languages']
-
-        return json_encode({'results': result})
+        return json_encode({'results': srIndexerApi().indexer().language.keys()})
 
     @staticmethod
     def sanitizeFileName(name):
@@ -2369,7 +2324,7 @@ class HomeAddShows(Home):
                 [[srIndexerApi(i).name, i, srIndexerApi(i).config["show_url"],
                   int(show['id']), show['seriesname'], show['firstaired']] for show in shows])
 
-        lang_id = srIndexerApi().config['langabbv_to_id'][lang]
+        lang_id = srIndexerApi().indexer().languages[lang]
         return json_encode({'results': final_results, 'langid': lang_id})
 
     def massAddTable(self, rootDir=None):
@@ -2420,9 +2375,7 @@ class HomeAddShows(Home):
                     pass
 
                 # see if the folder is in KODI already
-                dirResults = main_db.MainDB().select("SELECT * FROM tv_shows WHERE location = ?", [cur_path])
-
-                if dirResults:
+                if [x for x in sickrage.srCore.mainDB.db.all('tv_shows', with_doc=True) if x['doc']['location'] == cur_path]:
                     cur_dir['added_already'] = True
                 else:
                     cur_dir['added_already'] = False
@@ -2431,8 +2384,8 @@ class HomeAddShows(Home):
 
                 showid = show_name = indexer = None
                 for cur_provider in sickrage.srCore.metadataProviderDict.values():
-                    if not cur_provider.enabled:
-                        continue
+                    # if not cur_provider.enabled:
+                    #    continue
 
                     if not (showid and show_name):
                         (showid, show_name, indexer) = cur_provider.retrieveShowMetadata(cur_path)
@@ -2450,9 +2403,7 @@ class HomeAddShows(Home):
 
                 cur_dir['existing_info'] = (showid, show_name, indexer)
 
-                if showid and findCertainShow(sickrage.srCore.SHOWLIST, showid):
-                    cur_dir['added_already'] = True
-
+                if showid and findCertainShow(sickrage.srCore.SHOWLIST, showid): cur_dir['added_already'] = True
         return self.render(
             "/home/mass_add_table.mako",
             dirList=dir_list,
@@ -2915,7 +2866,9 @@ class HomeAddShows(Home):
 
             if indexer is not None and indexer_id is not None:
                 # add the show
-                sickrage.srCore.SHOWQUEUE.addShow(indexer, indexer_id, show_dir,
+                sickrage.srCore.SHOWQUEUE.addShow(indexer,
+                                                  indexer_id,
+                                                  show_dir,
                                                   default_status=sickrage.srCore.srConfig.STATUS_DEFAULT,
                                                   quality=sickrage.srCore.srConfig.QUALITY_DEFAULT,
                                                   flatten_folders=sickrage.srCore.srConfig.FLATTEN_FOLDERS_DEFAULT,
@@ -2953,19 +2906,17 @@ class Manage(Home, WebRoot):
         if status_list[0] == SNATCHED:
             status_list = Quality.SNATCHED + Quality.SNATCHED_PROPER
 
-        cur_show_results = main_db.MainDB().select(
-            "SELECT season, episode, name FROM tv_episodes WHERE showid = ? AND season != 0 AND status IN (" + ','.join(
-                ['?'] * len(status_list)) + ")", [int(indexer_id)] + status_list)
-
         result = {}
-        for cur_result in cur_show_results:
-            cur_season = int(cur_result["season"])
-            cur_episode = int(cur_result["episode"])
+        for dbData in [x['doc'] for x in sickrage.srCore.mainDB.db.get_many('tv_episodes', int(indexer_id), with_doc=True)
+                       if x['doc']['season'] != 0 and x['doc']['status'] in status_list]:
+
+            cur_season = int(dbData["season"])
+            cur_episode = int(dbData["episode"])
 
             if cur_season not in result:
                 result[cur_season] = {}
 
-            result[cur_season][cur_episode] = cur_result["name"]
+            result[cur_season][cur_episode] = dbData["name"]
 
         return json_encode(result)
 
@@ -2976,18 +2927,15 @@ class Manage(Home, WebRoot):
         status_list = []
 
         if whichStatus:
-            status_list = [int(whichStatus)]
             if int(whichStatus) == SNATCHED:
-                status_list += Quality.SNATCHED_PROPER + Quality.SNATCHED_BEST
+                status_list = Quality.SNATCHED + Quality.SNATCHED_PROPER + Quality.SNATCHED_BEST
 
         # if we have no status then this is as far as we need to go
         if len(status_list):
-
-            status_results = main_db.MainDB().select(
-                "SELECT show_name, tv_shows.indexer_id AS indexer_id FROM tv_episodes, tv_shows WHERE tv_episodes.status IN (" + ','.join(
-                    ['?'] * len(
-                        status_list)) + ") AND season != 0 AND tv_episodes.showid = tv_shows.indexer_id ORDER BY show_name",
-                status_list)
+            status_results = sorted([s['doc'] for s in sickrage.srCore.mainDB.db.all('tv_shows', with_doc=True)
+                                     for e in sickrage.srCore.mainDB.db.get_many('tv_episodes', s['doc']['indexer_id'], with_doc=True)
+                                     if e['doc']['status'] in status_list and e['doc']['season'] != 0],
+                                      key=lambda d: d['show_name'])
 
             for cur_status_result in status_results:
                 cur_indexer_id = int(cur_status_result["indexer_id"])
@@ -3034,13 +2982,12 @@ class Manage(Home, WebRoot):
             to_change[indexer_id].append(what)
 
         for cur_indexer_id in to_change:
-
             # get a list of all the eps we want to change if they just said "all"
             if 'all' in to_change[cur_indexer_id]:
-                all_eps_results = main_db.MainDB().select(
-                    "SELECT season, episode FROM tv_episodes WHERE status IN (" + ','.join(
-                        ['?'] * len(status_list)) + ") AND season != 0 AND showid = ?",
-                    status_list + [cur_indexer_id])
+                all_eps_results = [x['doc'] for x in
+                                   sickrage.srCore.mainDB.db.get_many('tv_episodes', int(cur_indexer_id), with_doc=True)
+                                   if x['doc']['status'] in status_list and x['doc']['season'] != 0]
+
                 all_eps = [str(x["season"]) + 'x' + str(x["episode"]) for x in all_eps_results]
                 to_change[cur_indexer_id] = all_eps
 
@@ -3050,21 +2997,18 @@ class Manage(Home, WebRoot):
 
     @staticmethod
     def showSubtitleMissed(indexer_id, whichSubs):
-
-        cur_show_results = main_db.MainDB().select(
-            "SELECT season, episode, name, subtitles FROM tv_episodes WHERE showid = ? AND season != 0 AND status LIKE '%4'",
-            [int(indexer_id)])
-
         result = {}
-        for cur_result in cur_show_results:
+        for dbData in [x['doc'] for x in sickrage.srCore.mainDB.db.get_many('tv_episodes', int(indexer_id), with_doc=True)
+                       if x['doc']['status'].endswith('4') and x['doc']['season'] != 0]:
+
             if whichSubs == 'all':
-                if not frozenset(subtitle_searcher.wantedLanguages()).difference(cur_result["subtitles"].split(',')):
+                if not frozenset(subtitle_searcher.wantedLanguages()).difference(dbData["subtitles"].split(',')):
                     continue
-            elif whichSubs in cur_result["subtitles"]:
+            elif whichSubs in dbData["subtitles"]:
                 continue
 
-            cur_season = int(cur_result["season"])
-            cur_episode = int(cur_result["episode"])
+            cur_season = int(dbData["season"])
+            cur_episode = int(dbData["episode"])
 
             if cur_season not in result:
                 result[cur_season] = {}
@@ -3072,9 +3016,9 @@ class Manage(Home, WebRoot):
             if cur_episode not in result[cur_season]:
                 result[cur_season][cur_episode] = {}
 
-            result[cur_season][cur_episode]["name"] = cur_result["name"]
+            result[cur_season][cur_episode]["name"] = dbData["name"]
 
-            result[cur_season][cur_episode]["subtitles"] = cur_result["subtitles"]
+            result[cur_season][cur_episode]["subtitles"] = dbData["subtitles"]
 
         return json_encode(result)
 
@@ -3090,11 +3034,18 @@ class Manage(Home, WebRoot):
                 action='subtitles_missed'
             )
 
-        status_results = main_db.MainDB().select(
-            "SELECT show_name, tv_shows.indexer_id as indexer_id, tv_episodes.subtitles subtitles " +
-            "FROM tv_episodes, tv_shows " +
-            "WHERE tv_shows.subtitles = 1 AND tv_episodes.status LIKE '%4' AND tv_episodes.season != 0 " +
-            "AND tv_episodes.showid = tv_shows.indexer_id ORDER BY show_name")
+        status_results = []
+        for s in [x['doc'] for x in sickrage.srCore.mainDB.db.all('tv_shows', with_doc=True)]:
+            if not s['subtitles'] == 1: continue
+            for e in [x['doc'] for x in sickrage.srCore.mainDB.db.get_many('tv_episodes', s['indexer_id'], with_doc=True)]:
+                if e['status'].endswith('4') and e['season'] != 0:
+                    status_results += [{
+                        'show_name': s['show_name'],
+                        'indexer_id': s['indexer_id'],
+                        'subtitles': e['subtitles']
+                    }]
+
+        status_results = sorted(status_results, key=lambda d: d['show_name'])
 
         ep_counts = {}
         show_names = {}
@@ -3149,10 +3100,10 @@ class Manage(Home, WebRoot):
         for cur_indexer_id in to_download:
             # get a list of all the eps we want to download subtitles if they just said "all"
             if 'all' in to_download[cur_indexer_id]:
-                all_eps_results = main_db.MainDB().select(
-                    "SELECT season, episode FROM tv_episodes WHERE status LIKE '%4' AND season != 0 AND showid = ?",
-                    [cur_indexer_id])
-                to_download[cur_indexer_id] = [str(x["season"]) + 'x' + str(x["episode"]) for x in all_eps_results]
+                dbData = [x['doc'] for x in sickrage.srCore.mainDB.db.get_many('tv_episodes', int(cur_indexer_id), with_doc=True)
+                          if x['doc']['status'].endswith('4') and x['doc']['season'] != 0]
+
+                to_download[cur_indexer_id] = [str(x["season"]) + 'x' + str(x["episode"]) for x in dbData]
 
             for epResult in to_download[cur_indexer_id]:
                 season, episode = epResult.split('x')
@@ -3173,7 +3124,7 @@ class Manage(Home, WebRoot):
     def backlogOverview(self):
         showCounts = {}
         showCats = {}
-        showSQLResults = {}
+        showResults = {}
 
         for curShow in sickrage.srCore.SHOWLIST:
 
@@ -3186,11 +3137,10 @@ class Manage(Home, WebRoot):
             epCounts[Overview.UNAIRED] = 0
             epCounts[Overview.SNATCHED] = 0
 
-            sqlResults = main_db.MainDB().select(
-                "SELECT * FROM tv_episodes WHERE tv_episodes.showid IN (SELECT tv_shows.indexer_id FROM tv_shows WHERE tv_shows.indexer_id = ? AND paused = 0) ORDER BY tv_episodes.season DESC, tv_episodes.episode DESC",
-                [curShow.indexerid])
+            dbData = sorted([e['doc'] for e in sickrage.srCore.mainDB.db.get_many('tv_episodes', curShow.indexerid, with_doc=True)
+                             if curShow.paused == 0], key=lambda d: (d['season'], d['episode']), reverse=True)
 
-            for curResult in sqlResults:
+            for curResult in dbData:
                 curEpCat = curShow.getOverview(int(curResult["status"] or -1))
                 if curEpCat:
                     epCats[str(curResult["season"]) + "x" + str(curResult["episode"])] = curEpCat
@@ -3198,13 +3148,13 @@ class Manage(Home, WebRoot):
 
             showCounts[curShow.indexerid] = epCounts
             showCats[curShow.indexerid] = epCats
-            showSQLResults[curShow.indexerid] = sqlResults
+            showResults[curShow.indexerid] = dbData
 
         return self.render(
             "/manage/backlog_overview.mako",
             showCounts=showCounts,
             showCats=showCats,
-            showSQLResults=showSQLResults,
+            showResults=showResults,
             title='Backlog Overview',
             header='Backlog Overview',
             topmenu='manage',
@@ -3643,14 +3593,17 @@ class Manage(Home, WebRoot):
 
     def failedDownloads(self, limit=100, toRemove=None):
         if limit == "0":
-            sqlResults = failed_db.FailedDB().select("SELECT * FROM failed")
+            dbData = [x['doc'] for x in sickrage.srCore.failedDB.db.all('failed', with_doc=True)]
         else:
-            sqlResults = failed_db.FailedDB().select("SELECT * FROM failed LIMIT ?", [limit])
+            dbData = [x['doc'] for x in sickrage.srCore.failedDB.db.all('failed', limit, with_doc=True)]
 
         toRemove = toRemove.split("|") if toRemove is not None else []
 
         for release in toRemove:
-            main_db.MainDB().action("DELETE FROM failed WHERE failed.release = ?", [release])
+            try:
+                sickrage.srCore.mainDB.db.delete(sickrage.srCore.mainDB.db.get('failed', release, with_doc=True)['doc'])
+            except RecordNotFound:
+                continue
 
         if toRemove:
             return self.redirect('/manage/failedDownloads/')
@@ -3658,7 +3611,7 @@ class Manage(Home, WebRoot):
         return self.render(
             "/manage/failed_downloads.mako",
             limit=limit,
-            failedResults=sqlResults,
+            failedResults=dbData,
             title='Failed Downloads',
             header='Failed Downloads',
             topmenu='manage',
@@ -3721,7 +3674,7 @@ class ManageSearches(Manage):
 
 
 @Route('/history(/?.*)')
-class History(WebRoot):
+class History(WebHandler):
     def __init__(self, *args, **kwargs):
         super(History, self).__init__(*args, **kwargs)
         self.historyTool = HistoryTool()
@@ -3755,6 +3708,7 @@ class History(WebRoot):
                                 history['season'] == row['season'] and
                                 history['episode'] == row['episode'] and
                                 history['quality'] == row['quality']) for history in compact):
+
                 history = {
                     'actions': [action],
                     'episode': row['episode'],
@@ -3772,9 +3726,11 @@ class History(WebRoot):
                          item['season'] == row['season'] and
                          item['episode'] == row['episode'] and
                          item['quality'] == row['quality']][0]
+
                 history = compact[index]
                 history['actions'].append(action)
-                history['actions'].sort(key=lambda x: x['time'], reverse=True)
+
+                history['actions'].sort(key=lambda d: d['time'], reverse=True)
 
         submenu = [
             {'title': 'Clear History', 'path': '/history/clearHistory', 'icon': 'ui-icon ui-icon-trash',
@@ -3812,7 +3768,7 @@ class History(WebRoot):
 
 
 @Route('/config(/?.*)')
-class Config(WebRoot):
+class Config(WebHandler):
     def __init__(self, *args, **kwargs):
         super(Config, self).__init__(*args, **kwargs)
 
@@ -3824,6 +3780,7 @@ class Config(WebRoot):
             {'title': 'Search Clients', 'path': '/config/search/', 'icon': 'ui-icon ui-icon-search'},
             {'title': 'Search Providers', 'path': '/config/providers/', 'icon': 'ui-icon ui-icon-search'},
             {'title': 'Subtitles Settings', 'path': '/config/subtitles/', 'icon': 'ui-icon ui-icon-comment'},
+            {'title': 'Quality Settings', 'path': '/config/qualitySettings/', 'icon': 'ui-icon ui-icon-folder-open'},
             {'title': 'Post Processing', 'path': '/config/postProcessing/', 'icon': 'ui-icon ui-icon-folder-open'},
             {'title': 'Notifications', 'path': '/config/notifications/', 'icon': 'ui-icon ui-icon-note'},
             {'title': 'Anime', 'path': '/config/anime/', 'icon': 'submenu-icon-anime'},
@@ -4008,10 +3965,8 @@ class ConfigGeneral(Config):
         sickrage.srCore.srConfig.save()
 
         if len(results) > 0:
-            for x in results:
-                sickrage.srCore.srLogger.error(x)
-            sickrage.srCore.srNotifications.error('Error(s) Saving Configuration',
-                                                  '<br>\n'.join(results))
+            [sickrage.srCore.srLogger.error(x) for x in results]
+            sickrage.srCore.srNotifications.error('Error(s) Saving Configuration', '<br>\n'.join(results))
         else:
             sickrage.srCore.srNotifications.message('[GENERAL] Configuration Saved', os.path.join(sickrage.CONFIG_FILE))
 
@@ -4175,10 +4130,8 @@ class ConfigSearch(Config):
         sickrage.srCore.srConfig.save()
 
         if len(results) > 0:
-            for x in results:
-                sickrage.srCore.srLogger.error(x)
-            sickrage.srCore.srNotifications.error('Error(s) Saving Configuration',
-                                                  '<br>\n'.join(results))
+            [sickrage.srCore.srLogger.error(x) for x in results]
+            sickrage.srCore.srNotifications.error('Error(s) Saving Configuration', '<br>\n'.join(results))
         else:
             sickrage.srCore.srNotifications.message('[SEARCH] Configuration Saved', os.path.join(sickrage.CONFIG_FILE))
 
@@ -4311,10 +4264,8 @@ class ConfigPostProcessing(Config):
         sickrage.srCore.srConfig.save()
 
         if len(results) > 0:
-            for x in results:
-                sickrage.srCore.srLogger.warning(x)
-            sickrage.srCore.srNotifications.error('Error(s) Saving Configuration',
-                                                  '<br>\n'.join(results))
+            [sickrage.srCore.srLogger.warning(x) for x in results]
+            sickrage.srCore.srNotifications.error('Error(s) Saving Configuration', '<br>\n'.join(results))
         else:
             sickrage.srCore.srNotifications.message('[POST-PROCESSING] Configuration Saved',
                                                     os.path.join(sickrage.CONFIG_FILE))
@@ -4408,24 +4359,21 @@ class ConfigProviders(Config):
 
     @staticmethod
     def canAddNewznabProvider(name):
-        if not name:
-            return json_encode({'error': 'No Provider Name specified'})
+        if not name: return json_encode({'error': 'No Provider Name specified'})
 
-        providerID = NewznabProvider(name, '').id
-        if providerID not in sickrage.srCore.providersDict.newznab():
-            return json_encode({'success': providerID})
+        providerObj = NewznabProvider(name, '', True)
+        if providerObj.id not in sickrage.srCore.providersDict.newznab():
+            return json_encode({'success': providerObj.id})
         return json_encode({'error': 'Provider Name already exists as ' + name})
 
     @staticmethod
     def canAddTorrentRssProvider(name, url, cookies, titleTAG):
-        if not name:
-            return json_encode({'error': 'No Provider Name specified'})
+        if not name: return json_encode({'error': 'No Provider Name specified'})
 
-        providerObj = TorrentRssProvider(name, url, cookies, titleTAG)
+        providerObj = TorrentRssProvider(name, url, True, cookies, titleTAG)
         if providerObj.id not in sickrage.srCore.providersDict.torrentrss():
             (succ, errMsg) = providerObj.validateRSS()
-            if succ:
-                return json_encode({'success': providerObj.id})
+            if succ: return json_encode({'success': providerObj.id})
             return json_encode({'error': errMsg})
         return json_encode({'error': 'Provider Name already exists as ' + name})
 
@@ -4449,108 +4397,160 @@ class ConfigProviders(Config):
             error += "\nNo Provider Api key specified"
 
         if not error:
-            tempProvider = NewznabProvider(name, url, key)
+            tempProvider = NewznabProvider(name, url, True, key)
             success, tv_categories, error = tempProvider.get_newznab_categories()
         return json_encode({'success': success, 'tv_categories': tv_categories, 'error': error})
 
     def saveProviders(self, provider_strings='', provider_order='', **kwargs):
         results = []
 
-        # enable/disable providers
-        for curProviderStr in provider_order.split():
-            curProvider, curEnabled = curProviderStr.split(':')
-            if curProvider not in sickrage.srCore.providersDict.all():
-                continue
-
-            curProvObj = sickrage.srCore.providersDict.all()[curProvider]
-            curProvObj.enabled = bool(sickrage.srCore.srConfig.to_int(curEnabled))
-
-        # add all the newznab info we got into our list
+        # custom providers
+        custom_providers = ''
         for curProviderStr in provider_strings.split():
-            cur_type, curProviderStr = curProviderStr.split('|', 1)
+            custom_providers += '{}!!!'.format(curProviderStr)
+            cur_type, curProviderData = curProviderStr.split('|', 1)
 
             if cur_type == "newznab":
-                cur_name, cur_url, cur_key, cur_cat = curProviderStr.split('|')
+                cur_name, cur_url, cur_key, cur_cat = curProviderData.split('|')
                 cur_url = sickrage.srCore.srConfig.clean_url(cur_url)
 
-                providerObj = NewznabProvider(cur_name, cur_url, key=cur_key)
+                providerObj = NewznabProvider(cur_name, cur_url, bool(not cur_key == 0), key=cur_key)
                 if providerObj.id not in sickrage.srCore.providersDict.newznab():
                     sickrage.srCore.providersDict.newznab().update(**{providerObj.id: providerObj})
                 else:
                     providerObj = sickrage.srCore.providersDict.newznab()[providerObj.id]
+                    providerObj.name = cur_name
+                    providerObj.urls['base_url'] = cur_url
+                    providerObj.key = cur_key
+                    providerObj.catIDs = cur_cat
 
-                # newznab provider settings
-                providerObj.name = cur_name
-                providerObj.urls['base_url'] = cur_url
-                providerObj.key = cur_key
-                providerObj.catIDs = cur_cat
-                providerObj.search_mode = str(getattr(kwargs, providerObj.id + '_search_mode', 'eponly')).strip()
-                providerObj.search_fallback = sickrage.srCore.srConfig.checkbox_to_value(
-                    getattr(kwargs, providerObj.id + '_search_fallback', 0))
-                providerObj.enable_daily = sickrage.srCore.srConfig.checkbox_to_value(
-                    getattr(kwargs, providerObj.id + '_enable_daily', 0))
-                providerObj.enable_backlog = sickrage.srCore.srConfig.checkbox_to_value(
-                    getattr(kwargs, providerObj.id + '_enable_backlog', 0))
             elif cur_type == "torrentrss":
-                curName, curURL, curCookies, curTitleTAG = curProviderStr.split('|')
-                curURL = sickrage.srCore.srConfig.clean_url(curURL)
+                cur_name, cur_url, cur_cookies, cur_title_tag = curProviderData.split('|')
+                cur_url = sickrage.srCore.srConfig.clean_url(cur_url)
 
-                providerObj = TorrentRssProvider(curName, curURL, curCookies, curTitleTAG)
+                providerObj = TorrentRssProvider(cur_name, cur_url, False, cur_cookies, cur_title_tag)
                 if providerObj.id not in sickrage.srCore.providersDict.torrentrss():
                     sickrage.srCore.providersDict.torrentrss().update(**{providerObj.id: providerObj})
                 else:
                     providerObj = sickrage.srCore.providersDict.torrentrss()[providerObj.id]
+                    providerObj.name = cur_name
+                    providerObj.urls['base_url'] = cur_url
+                    providerObj.cookies = cur_cookies
+                    providerObj.curTitleTAG = cur_title_tag
 
-                # torrentrss provider settings
-                providerObj.name = curName
-                providerObj.urls['base_url'] = curURL
-                providerObj.cookies = curCookies
-                providerObj.curTitleTAG = curTitleTAG
+        sickrage.srCore.srConfig.CUSTOM_PROVIDERS = custom_providers
+
+        # remove providers
+        for p in list(set(sickrage.srCore.providersDict.provider_order).difference(
+                [x.split(':')[0] for x in provider_order.split()])):
+            providerObj = sickrage.srCore.providersDict.all()[p]
+            del sickrage.srCore.providersDict[providerObj.type][p]
+
+        # enable/disable/sort providers
+        sickrage.srCore.providersDict.provider_order = []
+        for curProviderStr in provider_order.split():
+            curProvider, curEnabled = curProviderStr.split(':')
+            sickrage.srCore.providersDict.provider_order += [curProvider]
+            if curProvider in sickrage.srCore.providersDict.all():
+                curProvObj = sickrage.srCore.providersDict.all()[curProvider]
+                curProvObj.enabled = bool(sickrage.srCore.srConfig.to_int(curEnabled))
 
         # dynamically load provider settings
         for providerID, providerObj in sickrage.srCore.providersDict.all().items():
-            providerObj.minseed = int(str(getattr(kwargs, providerID + '_minseed', 0)).strip())
-            providerObj.minleech = int(str(getattr(kwargs, providerID + '_minleech', 0)).strip())
-            providerObj.ratio = str(getattr(kwargs, providerID + '_ratio', None)).strip()
-            providerObj.digest = str(getattr(kwargs, providerID + '_digest', None)).strip()
-            providerObj.hash = str(getattr(kwargs, providerID + '_hash', None)).strip()
-            providerObj.api_key = str(getattr(kwargs, providerID + '_api_key', None)).strip()
-            providerObj.username = str(getattr(kwargs, providerID + '_username', None)).strip()
-            providerObj.password = str(getattr(kwargs, providerID + '_password', None)).strip()
-            providerObj.passkey = str(getattr(kwargs, providerID + '_passkey', None)).strip()
-            providerObj.pin = str(getattr(kwargs, providerID + '_pin', None)).strip()
-            providerObj.confirmed = sickrage.srCore.srConfig.checkbox_to_value(
-                getattr(kwargs, providerID + '_confirmed', 0))
-            providerObj.ranked = sickrage.srCore.srConfig.checkbox_to_value(getattr(kwargs, providerID + '_ranked', 0))
-            providerObj.engrelease = sickrage.srCore.srConfig.checkbox_to_value(
-                getattr(kwargs, providerID + '_engrelease', 0))
-            providerObj.onlyspasearch = sickrage.srCore.srConfig.checkbox_to_value(
-                getattr(kwargs, providerID + '_onlyspasearch', 0))
-            providerObj.sorting = str(getattr(kwargs, providerID + '_sorting', 'seeders')).strip()
-            providerObj.freeleech = sickrage.srCore.srConfig.checkbox_to_value(
-                getattr(kwargs, providerID + '_freeleech', 0))
-            providerObj.search_mode = str(getattr(kwargs, providerID + '_search_mode', 'eponly')).strip()
-            providerObj.search_fallback = sickrage.srCore.srConfig.checkbox_to_value(
-                getattr(kwargs, providerID + '_search_fallback', 0))
-            providerObj.enable_daily = sickrage.srCore.srConfig.checkbox_to_value(
-                getattr(kwargs, providerID + '_enable_daily', 0))
-            providerObj.enable_backlog = sickrage.srCore.srConfig.checkbox_to_value(
-                getattr(kwargs, providerID + '_enable_backlog', 0))
-            providerObj.cat = int(str(getattr(kwargs, providerID + '_cat', 0)).strip())
-            providerObj.subtitle = sickrage.srCore.srConfig.checkbox_to_value(
-                getattr(kwargs, providerID + '_subtitle', 0))
+            try:
+                if hasattr(providerObj, 'minseed'):
+                    providerObj.minseed = int(kwargs.get(providerID + '_minseed') or 0)
 
-        # sort providers
-        sickrage.srCore.providersDict.sort(re.findall(r'\w+[^\W\s]', provider_order))
+                if hasattr(providerObj, 'minleech'):
+                    providerObj.minleech = int(kwargs.get(providerID + '_minleech') or 0)
+
+                if hasattr(providerObj, 'ratio'):
+                    providerObj.ratio = str(kwargs.get(providerID + '_ratio', '')).strip()
+
+                if hasattr(providerObj, 'digest'):
+                    providerObj.digest = str(kwargs.get(providerID + '_digest', '')).strip()
+
+                if hasattr(providerObj, 'hash'):
+                    providerObj.hash = str(kwargs.get(providerID + '_hash', '')).strip()
+
+                if hasattr(providerObj, 'key'):
+                    providerObj.key = str(kwargs.get(providerID + '_key', '')).strip()
+
+                if hasattr(providerObj, 'api_key'):
+                    providerObj.api_key = str(kwargs.get(providerID + '_api_key', '')).strip()
+
+                if hasattr(providerObj, 'username'):
+                    providerObj.username = str(kwargs.get(providerID + '_username', '')).strip()
+
+                if hasattr(providerObj, 'password'):
+                    providerObj.password = str(kwargs.get(providerID + '_password', '')).strip()
+
+                if hasattr(providerObj, 'passkey'):
+                    providerObj.passkey = str(kwargs.get(providerID + '_passkey', '')).strip()
+
+                if hasattr(providerObj, 'pin'):
+                    providerObj.pin = str(kwargs.get(providerID + '_pin', '')).strip()
+
+                if hasattr(providerObj, 'confirmed'):
+                    providerObj.confirmed = sickrage.srCore.srConfig.checkbox_to_value(
+                        kwargs.get(providerID + '_confirmed') or 0)
+
+                if hasattr(providerObj, 'ranked'):
+                    providerObj.ranked = sickrage.srCore.srConfig.checkbox_to_value(
+                        kwargs.get(providerID + '_ranked') or 0)
+
+                if hasattr(providerObj, 'engrelease'):
+                    providerObj.engrelease = sickrage.srCore.srConfig.checkbox_to_value(
+                        kwargs.get(providerID + '_engrelease') or 0)
+
+                if hasattr(providerObj, 'onlyspasearch'):
+                    providerObj.onlyspasearch = sickrage.srCore.srConfig.checkbox_to_value(
+                        kwargs.get(providerID + '_onlyspasearch') or 0)
+
+                if hasattr(providerObj, 'sorting'):
+                    providerObj.sorting = str(kwargs.get(providerID + '_sorting', 'seeders')).strip()
+
+                if hasattr(providerObj, 'freeleech'):
+                    providerObj.freeleech = sickrage.srCore.srConfig.checkbox_to_value(
+                        kwargs.get(providerID + '_freeleech') or 0)
+
+                if hasattr(providerObj, 'reject_m2ts'):
+                    providerObj.reject_m2ts = sickrage.srCore.srConfig.checkbox_to_value(
+                        kwargs.get(providerID + '_reject_m2ts') or 0)
+
+                if hasattr(providerObj, 'search_mode'):
+                    providerObj.search_mode = str(kwargs.get(providerID + '_search_mode', 'eponly')).strip()
+
+                if hasattr(providerObj, 'search_fallback'):
+                    providerObj.search_fallback = sickrage.srCore.srConfig.checkbox_to_value(
+                        kwargs.get(providerID + '_search_fallback') or 0)
+
+                if hasattr(providerObj, 'enable_daily'):
+                    providerObj.enable_daily = sickrage.srCore.srConfig.checkbox_to_value(
+                        kwargs.get(providerID + '_enable_daily') or 0)
+
+                if hasattr(providerObj, 'enable_backlog'):
+                    providerObj.enable_backlog = sickrage.srCore.srConfig.checkbox_to_value(
+                        kwargs.get(providerID + '_enable_backlog') or 0)
+
+                if hasattr(providerObj, 'cat'):
+                    providerObj.cat = int(kwargs.get(providerID + '_cat') or 0)
+
+                if hasattr(providerObj, 'subtitle'):
+                    providerObj.subtitle = sickrage.srCore.srConfig.checkbox_to_value(
+                        kwargs.get(providerID + '_subtitle') or 0)
+
+                if hasattr(providerObj, 'cookies'):
+                    providerObj.cookies = str(kwargs.get(providerID + '_cookies', '')).strip()
+            except Exception as e:
+                continue
 
         # save provider settings
         sickrage.srCore.srConfig.save()
 
         if len(results) > 0:
-            for x in results:
-                sickrage.srCore.srLogger.error(x)
-            sickrage.srCore.srNotifications.error('Error(s) Saving Configuration',
-                                                  '<br>\n'.join(results))
+            [sickrage.srCore.srLogger.error(x) for x in results]
+            sickrage.srCore.srNotifications.error('Error(s) Saving Configuration', '<br>\n'.join(results))
         else:
             sickrage.srCore.srNotifications.message('[PROVIDERS] Configuration Saved',
                                                     os.path.join(sickrage.CONFIG_FILE))
@@ -4840,10 +4840,8 @@ class ConfigNotifications(Config):
         sickrage.srCore.srConfig.save()
 
         if len(results) > 0:
-            for x in results:
-                sickrage.srCore.srLogger.error(x)
-            sickrage.srCore.srNotifications.error('Error(s) Saving Configuration',
-                                                  '<br>\n'.join(results))
+            [sickrage.srCore.srLogger.error(x) for x in results]
+            sickrage.srCore.srNotifications.error('Error(s) Saving Configuration', '<br>\n'.join(results))
         else:
             sickrage.srCore.srNotifications.message('[NOTIFICATIONS] Configuration Saved',
                                                     os.path.join(sickrage.CONFIG_FILE))
@@ -4870,7 +4868,7 @@ class ConfigSubtitles(Config):
     def saveSubtitles(self, use_subtitles=None, subtitles_plugins=None, subtitles_languages=None, subtitles_dir=None,
                       service_order=None, subtitles_history=None, subtitles_finder_frequency=None,
                       subtitles_multi=None, embedded_subtitles_all=None, subtitles_extra_scripts=None,
-                      subtitles_hearing_impaired=None,
+                      subtitles_hearing_impaired=None, itasa_user=None, itasa_pass=None,
                       addic7ed_user=None, addic7ed_pass=None, legendastv_user=None, legendastv_pass=None,
                       opensubtitles_user=None, opensubtitles_pass=None):
 
@@ -4908,16 +4906,16 @@ class ConfigSubtitles(Config):
         sickrage.srCore.srConfig.ADDIC7ED_PASS = addic7ed_pass or ''
         sickrage.srCore.srConfig.LEGENDASTV_USER = legendastv_user or ''
         sickrage.srCore.srConfig.LEGENDASTV_PASS = legendastv_pass or ''
+        sickrage.srCore.srConfig.ITASA_USER = itasa_user or ''
+        sickrage.srCore.srConfig.ITASA_PASS = itasa_pass or ''
         sickrage.srCore.srConfig.OPENSUBTITLES_USER = opensubtitles_user or ''
         sickrage.srCore.srConfig.OPENSUBTITLES_PASS = opensubtitles_pass or ''
 
         sickrage.srCore.srConfig.save()
 
         if len(results) > 0:
-            for x in results:
-                sickrage.srCore.srLogger.error(x)
-            sickrage.srCore.srNotifications.error('Error(s) Saving Configuration',
-                                                  '<br>\n'.join(results))
+            [sickrage.srCore.srLogger.error(x) for x in results]
+            sickrage.srCore.srNotifications.error('Error(s) Saving Configuration', '<br>\n'.join(results))
         else:
             sickrage.srCore.srNotifications.message('[SUBTITLES] Configuration Saved',
                                                     os.path.join(sickrage.CONFIG_FILE))
@@ -4955,18 +4953,43 @@ class ConfigAnime(Config):
         sickrage.srCore.srConfig.save()
 
         if len(results) > 0:
-            for x in results:
-                sickrage.srCore.srLogger.error(x)
-            sickrage.srCore.srNotifications.error('Error(s) Saving Configuration',
-                                                  '<br>\n'.join(results))
+            [sickrage.srCore.srLogger.error(x) for x in results]
+            sickrage.srCore.srNotifications.error('Error(s) Saving Configuration', '<br>\n'.join(results))
         else:
             sickrage.srCore.srNotifications.message('[ANIME] Configuration Saved', os.path.join(sickrage.CONFIG_FILE))
 
         return self.redirect("/config/anime/")
 
 
+@Route('/config/qualitySettings(/?.*)')
+class ConfigQualitySettings(Config):
+    def __init__(self, *args, **kwargs):
+        super(ConfigQualitySettings, self).__init__(*args, **kwargs)
+
+    def index(self):
+        return self.render(
+            "/config/quality_settings.mako",
+            submenu=self.ConfigMenu(),
+            title='Config - Quality Settings',
+            header='Quality Settings',
+            topmenu='config',
+            controller='config',
+            action='quality_settings'
+        )
+
+    def saveQualities(self, **kwargs):
+        sickrage.srCore.srConfig.QUALITY_SIZES.update(dict((int(k), int(v)) for k, v in kwargs.items()))
+
+        sickrage.srCore.srConfig.save()
+
+        sickrage.srCore.srNotifications.message('[QUALITY SETTINGS] Configuration Saved',
+                                                os.path.join(sickrage.CONFIG_FILE))
+
+        return self.redirect("/config/qualitySettings/")
+
+
 @Route('/logs(/?.*)')
-class Logs(WebRoot):
+class Logs(WebHandler):
     def __init__(self, *args, **kwargs):
         super(Logs, self).__init__(*args, **kwargs)
 

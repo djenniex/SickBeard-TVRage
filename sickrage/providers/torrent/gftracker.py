@@ -1,5 +1,5 @@
 # Author: Seamus Wassman
-# URL: http://github.com/SiCKRAGETV/SickRage/
+# URL: https://sickrage.ca
 #
 # This file is part of SickRage.
 #
@@ -22,9 +22,8 @@ import re
 import traceback
 
 import requests
-
 import sickrage
-from sickrage.core.caches import tv_cache
+from sickrage.core.caches.tv_cache import TVCache
 from sickrage.core.exceptions import AuthException
 from sickrage.core.helpers import bs4_parser, convert_size
 from sickrage.providers import TorrentProvider
@@ -32,9 +31,9 @@ from sickrage.providers import TorrentProvider
 
 class GFTrackerProvider(TorrentProvider):
     def __init__(self):
-        super(GFTrackerProvider, self).__init__("GFTracker",'www.thegft.org')
+        super(GFTrackerProvider, self).__init__("GFTracker",'www.thegft.org', True)
 
-        self.supportsBacklog = True
+        self.supports_backlog = True
 
         self.username = None
         self.password = None
@@ -54,16 +53,16 @@ class GFTrackerProvider(TorrentProvider):
 
         self.proper_strings = ['PROPER', 'REPACK']
 
-        self.cache = GFTrackerCache(self)
+        self.cache = TVCache(self, min_time=20)
 
-    def _checkAuth(self):
+    def _check_auth(self):
 
         if not self.username or not self.password:
             raise AuthException("Your authentication credentials for " + self.name + " are missing, check your config.")
 
         return True
 
-    def _doLogin(self):
+    def login(self):
 
         login_params = {'username': self.username,
                         'password': self.password}
@@ -90,7 +89,7 @@ class GFTrackerProvider(TorrentProvider):
         results = []
         items = {'Season': [], 'Episode': [], 'RSS': []}
 
-        if not self._doLogin():
+        if not self.login():
             return results
 
         for mode in search_params.keys():
@@ -173,16 +172,5 @@ class GFTrackerProvider(TorrentProvider):
 
         return results
 
-    def seedRatio(self):
+    def seed_ratio(self):
         return self.ratio
-
-class GFTrackerCache(tv_cache.TVCache):
-    def __init__(self, provider_obj):
-        tv_cache.TVCache.__init__(self, provider_obj)
-
-        # Poll delay in minutes
-        self.minTime = 20
-
-    def _getRSSData(self):
-        search_params = {'RSS': ['']}
-        return {'entries': self.provider.search(search_params)}

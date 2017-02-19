@@ -1,6 +1,5 @@
-#!/usr/bin/env python2
 # Author: echel0n <echel0n@sickrage.ca>
-# URL: https://git.sickrage.ca
+# URL: https://sickrage.ca
 #
 # This file is part of SickRage.
 #
@@ -23,19 +22,19 @@ import io
 import os
 import random
 import shelve
-import tempfile
+import ssl
 import threading
 import urllib2
 from contextlib import closing
 
 import cachecontrol
 import certifi
+import cfscrape as cfscrape
+import requests
 from cachecontrol.heuristics import ExpiresAfter
-from requests_futures.sessions import FuturesSession
 
 import sickrage
 from sickrage.core.helpers import chmodAsParent, remove_file_failed
-from sickrage.core.webclient.exceptions import handle_exception
 from sickrage.core.webclient.useragents import USER_AGENTS
 
 
@@ -66,44 +65,65 @@ class DBCache(object):
                 cache.clear()
 
 
-class srSession(FuturesSession):
-    @handle_exception
-    def request(self, method, url, headers=None, params=None, cache=True, raise_exceptions=True, *args, **kwargs):
-        url = self.normalize_url(url)
-        kwargs.setdefault('params', {}).update(params or {})
-        kwargs.setdefault('headers', {}).update(headers or {})
+class srSession(cfscrape.CloudflareScraper):
+    def request(self, method, url, headers=None, params=None, proxies=None, cache=True, verify=False, *args, **kwargs):
+        if headers is None: headers = {}
+        if params is None: params = {}
+        if proxies is None: proxies = {}
 
-        # if method == 'POST':
-        #    self.session.headers.update({"Content-type": "application/x-www-form-urlencoded"})
-        kwargs.setdefault('headers', {}).update({'Accept-Encoding': 'gzip, deflate'})
-        kwargs.setdefault('headers', {}).update(random.choice(USER_AGENTS))
+        url = self.normalize_url(url)
+
+        headers.update({'Accept-Encoding': 'gzip, deflate'})
+        headers.update(random.choice(USER_AGENTS))
 
         # request session ssl verify
-        kwargs['verify'] = False
         if sickrage.srCore.srConfig.SSL_VERIFY:
             try:
-                kwargs['verify'] = certifi.where()
+                verify = certifi.where()
             except:
                 pass
 
         # request session proxies
-        if 'Referer' not in kwargs.get('headers', {}) and sickrage.srCore.srConfig.PROXY_SETTING:
+        if 'Referer' not in headers and sickrage.srCore.srConfig.PROXY_SETTING:
             sickrage.srCore.srLogger.debug("Using global proxy: " + sickrage.srCore.srConfig.PROXY_SETTING)
             scheme, address = urllib2.splittype(sickrage.srCore.srConfig.PROXY_SETTING)
-            address = ('http://{}'.format(sickrage.srCore.srConfig.PROXY_SETTING), sickrage.srCore.srConfig.PROXY_SETTING)[scheme]
-            kwargs.setdefault('proxies', {}).update({"http": address, "https": address})
-            kwargs.setdefault('headers', {}).update({'Referer': address})
+            address = ('http://{}'.format(sickrage.srCore.srConfig.PROXY_SETTING),
+                       sickrage.srCore.srConfig.PROXY_SETTING)[scheme]
+            proxies.update({"http": address, "https": address})
+            headers.update({'Referer': address})
 
         # setup session caching
         if cache:
-            cachecontrol.CacheControl(self,
-                                      cache=DBCache(os.path.join(tempfile.gettempdir(), 'cachecontrol.db')),
-                                      heuristic=ExpiresAfter(days=7))
+            cache_file = os.path.abspath(os.path.join(sickrage.DATA_DIR, 'sessions.db'))
+            self.__class__ = cachecontrol.CacheControl(self,
+                                                       cache=DBCache(cache_file),
+                                                       heuristic=ExpiresAfter(days=7)).__class__
 
-        # get result
-        response = super(srSession, self).request(method, url, *args, **kwargs).result()
-        if raise_exceptions:
+        # get web response
+        response = super(srSession, self).request(method,
+                                                  url,
+                                                  headers=headers,
+                                                  params=params,
+                                                  verify=verify,
+                                                  proxies=proxies,
+                                                  *args, **kwargs)
+
+        try:
+            # check web response for errors
             response.raise_for_status()
+        except requests.exceptions.SSLError as e:
+            if ssl.OPENSSL_VERSION_INFO < (1, 0, 1, 5):
+                sickrage.srCore.srLogger.info(
+                    "SSL Error requesting url: '{}' You have {}, try upgrading OpenSSL to 1.0.1e+".format(
+                        e.request.url, ssl.OPENSSL_VERSION))
+
+            if sickrage.srCore.srConfig.SSL_VERIFY:
+                sickrage.srCore.srLogger.info(
+                    "SSL Error requesting url: '{}', try disabling cert verification in advanced settings".format(
+                        e.request.url))
+        except Exception:
+            pass
+
         return response
 
     def download(self, url, filename, **kwargs):

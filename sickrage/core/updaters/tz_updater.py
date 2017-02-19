@@ -1,6 +1,6 @@
 # Author: echel0n <echel0n@sickrage.ca>
-# URL: https://sickrage.tv
-# Git: https://github.com/SiCKRAGETV/SickRage.git
+# URL: https://sickrage.ca
+# Git: https://git.sickrage.ca/SiCKRAGE/sickrage.git
 #
 # This file is part of SickRage.
 #
@@ -22,13 +22,12 @@ from __future__ import unicode_literals
 import re
 from datetime import datetime
 
-from dateutil import tz
-
 import sickrage
-from sickrage.core.databases import cache_db
+from CodernityDB.database import RecordNotFound
+from dateutil import tz
 from sickrage.core.helpers import tryInt
 
-
+network_dict = {}
 time_regex = re.compile(r'(?P<hour>\d{1,2})(?:[:.]?(?P<minute>\d{2})?)? ?(?P<meridiem>[PA]\.? ?M?)?\b', re.I)
 sr_timezone = tz.tzwinlocal() if tz.tzwinlocal else tz.tzlocal()
 
@@ -56,28 +55,36 @@ def update_network_dict():
     except (IOError, OSError):
         pass
 
-    network_timezones = load_network_dict()
-
     queries = []
     for network, timezone in d.items():
-        existing = network in network_timezones
+        existing = network in network_dict
         if not existing:
-            queries.append(['INSERT OR IGNORE INTO network_timezones VALUES (?,?);', [network, timezone]])
-        elif network_timezones[network] is not timezone:
-            queries.append(['UPDATE OR IGNORE network_timezones SET timezone = ? WHERE network_name = ?;',
-                            [timezone, network]])
+            try:
+                sickrage.srCore.cacheDB.db.get('network_timezones', network)
+            except RecordNotFound:
+                sickrage.srCore.cacheDB.db.insert({
+                    '_t': 'network_timezones',
+                    'network_name': network,
+                    'timezone': timezone
+                })
+        elif network_dict[network] is not timezone:
+            try:
+                dbData = sickrage.srCore.cacheDB.db.get('network_timezones', network, with_doc=True)['doc']
+                dbData['timezone'] = timezone
+                sickrage.srCore.cacheDB.db.update(dbData)
+            except RecordNotFound:
+                continue
 
         if existing:
-            del network_timezones[network]
+            del network_dict[network]
 
-    if network_timezones:
-        purged = [x for x in network_timezones]
-        queries.append(
-            ['DELETE FROM network_timezones WHERE network_name IN (%s);' % ','.join(['?'] * len(purged)), purged])
+    for x in network_dict:
+        try:
+            sickrage.srCore.cacheDB.db.delete(sickrage.srCore.cacheDB.db.get('network_timezones', x, with_doc=True)['doc'])
+        except RecordNotFound:
+            continue
 
-    if len(queries) > 0:
-        cache_db.CacheDB().mass_action(queries)
-        del queries  # cleanup
+    load_network_dict()
 
 
 # load network timezones from db into dict
@@ -85,29 +92,25 @@ def load_network_dict():
     """
     Return network timezones from db
     """
-    try:
-        cur_network_list = cache_db.CacheDB().select('SELECT * FROM network_timezones;')
-        if cur_network_list:
-            return dict(cur_network_list)
-    except Exception:
-        pass
 
-    return {}
+    global network_dict
+    network_dict = dict([(x['doc']['network_name'], x['doc']['timezone']) for x in
+                         sickrage.srCore.cacheDB.db.all('network_timezones', with_doc=True)])
+
 
 # get timezone of a network or return default timezone
-def get_network_timezone(network, _network_dict):
+def get_network_timezone(network):
     """
     Get a timezone of a network from a given network dict
 
     :param network: network to look up (needle)
-    :param _network_dict: dict to look up in (haystack)
     :return:
     """
     if network is None:
         return sr_timezone
 
     try:
-        return tz.gettz(_network_dict[network]) or sr_timezone
+        return tz.gettz(network_dict[network]) or sr_timezone
     except Exception:
         return sr_timezone
 
@@ -122,8 +125,11 @@ def parse_date_time(d, t, network, dateOnly=False):
     :return: datetime object containing local time
     """
 
+    if not network_dict:
+        load_network_dict()
+
     parsed_time = time_regex.search(t)
-    network_tz = get_network_timezone(network, load_network_dict())
+    network_tz = get_network_timezone(network)
 
     hr = 0
     m = 0

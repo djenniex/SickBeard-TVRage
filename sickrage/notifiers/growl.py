@@ -1,5 +1,5 @@
 # Author: echel0n <echel0n@sickrage.ca>
-# URL: http://github.com/SiCKRAGETV/SickRage/
+# URL: https://sickrage.ca
 #
 # This file is part of SickRage.
 #
@@ -22,7 +22,6 @@ import socket
 
 import gntp
 import gntp.core
-
 import sickrage
 from sickrage.core.common import notifyStrings, NOTIFY_SNATCH, NOTIFY_DOWNLOAD, NOTIFY_SUBTITLE_DOWNLOAD, \
     NOTIFY_GIT_UPDATE_TEXT, NOTIFY_GIT_UPDATE
@@ -30,7 +29,7 @@ from sickrage.notifiers import srNotifiers
 
 
 class GrowlNotifier(srNotifiers):
-    sr_logo_url = 'http://www.sickrage.ca/favicon.ico'
+    sr_logo_url = 'https://www.sickrage.ca/favicon.ico'
 
     def test_notify(self, host, password):
         self._sendRegistration(host, password, 'Test')
@@ -116,16 +115,7 @@ class GrowlNotifier(srNotifiers):
 
         growlHosts = [(hostParts[0], port)]
 
-        opts = {}
-
-        opts['name'] = name
-
-        opts['title'] = title
-        opts['app'] = 'SiCKRAGE'
-
-        opts['sticky'] = None
-        opts['priority'] = None
-        opts['debug'] = False
+        opts = {'name': name, 'title': title, 'app': 'SiCKRAGE', 'sticky': None, 'priority': None, 'debug': False}
 
         if password is None:
             opts['password'] = sickrage.srCore.srConfig.GROWL_PASSWORD

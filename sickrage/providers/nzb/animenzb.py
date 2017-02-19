@@ -1,7 +1,7 @@
-#!/usr/bin/env python2
+
 
 # Author: echel0n <echel0n@sickrage.ca>
-# URL: https://git.sickrage.ca
+# URL: https://sickrage.ca
 #
 # This file is part of SickRage.
 #
@@ -32,11 +32,11 @@ from sickrage.providers import NZBProvider
 
 class AnimeNZBProvider(NZBProvider):
     def __init__(self):
-        super(AnimeNZBProvider, self).__init__("AnimeNZB", 'animenzb.com')
-        self.supportsBacklog = False
-        self.supportsAbsoluteNumbering = True
+        super(AnimeNZBProvider, self).__init__("AnimeNZB", 'animenzb.com', False)
+        self.supports_backlog = False
+        self.supports_absolute_numbering = True
         self.anime_only = True
-        self.cache = animenzbCache(self)
+        self.cache = animenzbCache(self, min_time=20)
 
     def _get_season_search_strings(self, ep_obj):
         return [x for x in show_names.makeSceneSeasonSearchString(self.show, ep_obj)]
@@ -72,7 +72,7 @@ class AnimeNZBProvider(NZBProvider):
 
         return results
 
-    def findPropers(self, date=None):
+    def find_propers(self, search_date=None):
 
         results = []
 
@@ -87,7 +87,7 @@ class AnimeNZBProvider(NZBProvider):
             else:
                 continue
 
-            if not date or result_date > date:
+            if not search_date or result_date > search_date:
                 search_result = Proper(title, url, result_date, self.show)
                 results.append(search_result)
 
@@ -95,18 +95,12 @@ class AnimeNZBProvider(NZBProvider):
 
 
 class animenzbCache(tv_cache.TVCache):
-    def __init__(self, provider_obj):
-        tv_cache.TVCache.__init__(self, provider_obj)
-
-        # only poll animenzb every 20 minutes max
-        self.minTime = 20
-
-    def _getRSSData(self):
+    def _get_rss_data(self):
         params = {
             "cat": "anime".encode('utf-8'),
             "max": "100".encode('utf-8')
         }
 
-        rss_url = self.provider.url + 'rss?' + urllib.urlencode(params)
+        rss_url = self.provider.urls['base_url'] + '/rss?' + urllib.urlencode(params)
 
         return self.getRSSFeed(rss_url)

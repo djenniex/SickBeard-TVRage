@@ -1,7 +1,6 @@
-#!/usr/bin/env python2
-
+#!/usr/bin/env python2.7
 # Author: echel0n <echel0n@sickrage.ca>
-# URL: https://git.sickrage.ca
+# URL: https://sickrage.ca
 #
 # This file is part of SickRage.
 #
@@ -22,14 +21,14 @@ from __future__ import print_function, unicode_literals
 
 import unittest
 
-from sickrage.core.databases import main_db
+from sickrage.core.databases.main import MainDB
 from tests import SiCKRAGETestDBCase
 
 
 class DBBasicTests(SiCKRAGETestDBCase):
     def setUp(self, **kwargs):
         super(DBBasicTests, self).setUp()
-        self.db = main_db.MainDB()
+        self.db = MainDB()
 
     def test_select(self):
         self.db.select("SELECT * FROM tv_episodes WHERE showid = ? AND location != ''", [0000])

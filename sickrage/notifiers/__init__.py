@@ -1,5 +1,5 @@
 # Author: echel0n <echel0n@sickrage.ca>
-# URL: http://github.com/SiCKRAGETV/SickRage/
+# URL: https://sickrage.ca
 #
 # This file is part of SickRage.
 #
@@ -22,9 +22,6 @@ import sickrage
 
 
 class srNotifiers(object):
-    def __init__(self):
-        self.session = None
-
     @staticmethod
     def notify_download(ep_name):
         for n in sickrage.srCore.notifiersDict.values():

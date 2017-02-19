@@ -1,7 +1,7 @@
-#!/usr/bin/env python2
+
 
 # Author: echel0n <echel0n@sickrage.ca>
-# URL: http://github.com/SiCKRAGETV/SickRage/
+# URL: https://sickrage.ca
 #
 # This file is part of SickRage.
 #
@@ -21,125 +21,69 @@
 from __future__ import unicode_literals
 
 import datetime
-import itertools
 import time
 import urllib2
 
+from CodernityDB.database import RecordNotFound
+
 import sickrage
 from sickrage.core.common import Quality
-from sickrage.core.databases import cache_db
 from sickrage.core.exceptions import AuthException
 from sickrage.core.helpers import findCertainShow, show_names
-from sickrage.core.nameparser import InvalidNameException, InvalidShowException, \
-    NameParser
+from sickrage.core.nameparser import InvalidNameException, InvalidShowException, NameParser
 from sickrage.core.rssfeeds import getFeed
 
 
-class CacheDBConnection(cache_db.CacheDB):
-    def __init__(self, providerName):
-        super(CacheDBConnection, self).__init__()
-
-        # Create the table if it's not already there
-        try:
-            if not self.hasTable(providerName):
-                self.action(
-                        "CREATE TABLE [" + providerName + "] (name TEXT, season NUMERIC, episodes TEXT, indexerid NUMERIC, url TEXT, time NUMERIC, quality TEXT, release_group TEXT)")
-            else:
-                sqlResults = self.select(
-                    "SELECT url, COUNT(url) AS count FROM [" + providerName + "] GROUP BY url HAVING count > 1")
-
-                for cur_dupe in sqlResults:
-                    self.action("DELETE FROM [" + providerName + "] WHERE url = ?", [cur_dupe["url"]])
-
-            # add unique index to prevent further dupes from happening if one does not exist
-            self.action("CREATE UNIQUE INDEX IF NOT EXISTS idx_url ON [" + providerName + "] (url)")
-
-            # add release_group column to table if missing
-            if not self.hasColumn(providerName, 'release_group'):
-                self.addColumn(providerName, 'release_group', "TEXT", "")
-
-            # add version column to table if missing
-            if not self.hasColumn(providerName, 'version'):
-                self.addColumn(providerName, 'version', "NUMERIC", "-1")
-
-        except Exception as e:
-            if str(e) != "table [" + providerName + "] already exists":
-                raise
-
-        # Create the table if it's not already there
-        try:
-            if not self.hasTable('lastUpdate'):
-                self.action("CREATE TABLE lastUpdate (provider TEXT, time NUMERIC)")
-        except Exception as e:
-            if str(e) != "table lastUpdate already exists":
-                raise
-
-
 class TVCache(object):
-    def __init__(self, provider):
+    def __init__(self, provider, min_time=10, search_params=None):
         self.provider = provider
         self.providerID = self.provider.id
-        self.providerDB = None
-        self.minTime = 10
+        self.min_time = min_time
+        self.search_params = search_params or {'RSS': ['']}
 
-    def _getDB(self):
-        # init provider database if not done already
-        if not self.providerDB:
-            self.providerDB = CacheDBConnection(self.providerID)
-
-        return self.providerDB
-
-    def _clearCache(self):
+    def clear(self):
         if self.shouldClearCache():
-            myDB = self._getDB()
-            myDB.action("DELETE FROM [{}] WHERE 1".format(self.providerID))
+            [sickrage.srCore.cacheDB.db.delete(x['doc']) for x in sickrage.srCore.cacheDB.db.get_many('providers', self.providerID, with_doc=True)]
 
     def _get_title_and_url(self, item):
         return self.provider._get_title_and_url(item)
 
-    def _getRSSData(self):
-        return None
+    def _get_rss_data(self):
+        if self.search_params:
+            return {'entries': self.provider.search(self.search_params)}
 
-    def _checkAuth(self, data):
+    def check_auth(self, data):
         return True
 
-    def _checkItemAuth(self, title, url):
+    def check_item(self, title, url):
         return True
 
-    def updateCache(self):
+    def update(self):
         # check if we should update
-        if self.shouldUpdate():
+        if self.should_update():
             try:
-                data = self._getRSSData()
-                if not self._checkAuth(data):
+                data = self._get_rss_data()
+                if not self.check_auth(data):
                     return False
 
                 # clear cache
-                self._clearCache()
+                self.clear()
 
                 # set updated
-                self.setLastUpdate()
+                self.last_update = datetime.datetime.today()
 
-                cl = []
-                for item in data['entries']:
-                    ci = self._parseItem(item)
-                    if ci is not None:
-                        cl.append(ci)
-
-                if len(cl) > 0:
-                    self._getDB().mass_action(cl)
-                    del cl  # cleanup
-
+                [self._parseItem(item) for item in data['entries']]
             except AuthException as e:
-                sickrage.srCore.srLogger.error("Authentication error: {}".format(e.message))
+                sickrage.srCore.srLogger.warning("Authentication error: {}".format(e.message))
                 return False
             except Exception as e:
-                sickrage.srCore.srLogger.debug("Error while searching {}, skipping: {}".format(self.provider.name, repr(e)))
+                sickrage.srCore.srLogger.debug(
+                    "Error while searching {}, skipping: {}".format(self.provider.name, repr(e)))
                 return False
 
         return True
 
-    def getRSSFeed(self, url):
+    def getRSSFeed(self, url, params=None):
         handlers = []
 
         if sickrage.srCore.srConfig.PROXY_SETTING:
@@ -148,7 +92,7 @@ class TVCache(object):
             address = sickrage.srCore.srConfig.PROXY_SETTING if scheme else 'http://' + sickrage.srCore.srConfig.PROXY_SETTING
             handlers = [urllib2.ProxyHandler({'http': address, 'https': address})]
 
-        return getFeed(url, handlers=handlers)
+        return getFeed(url, params=params, handlers=handlers)
 
     def _translateTitle(self, title):
         return '' + title.replace(' ', '.')
@@ -159,88 +103,80 @@ class TVCache(object):
     def _parseItem(self, item):
         title, url = self._get_title_and_url(item)
 
-        self._checkItemAuth(title, url)
+        self.check_item(title, url)
 
         if title and url:
             title = self._translateTitle(title)
             url = self._translateLinkURL(url)
-            return self._addCacheEntry(title, url)
+            self.addCacheEntry(title, url)
 
         else:
             sickrage.srCore.srLogger.debug(
-                    "The data returned from the " + self.provider.name + " feed is incomplete, this result is unusable")
+                "The data returned from the " + self.provider.name + " feed is incomplete, this result is unusable")
 
-        return False
-
-    def _getLastUpdate(self):
-        myDB = self._getDB()
-        sqlResults = myDB.select("SELECT time FROM lastUpdate WHERE provider = ?", [self.providerID])
-
-        if sqlResults:
-            lastTime = int(sqlResults[0]["time"])
-            if lastTime > int(time.mktime(datetime.datetime.today().timetuple())):
-                lastTime = 0
-        else:
+    @property
+    def last_update(self):
+        try:
+            dbData = sickrage.srCore.cacheDB.db.get('lastUpdate', self.providerID, with_doc=True)['doc']
+            lastTime = int(dbData["time"])
+            if lastTime > int(time.mktime(datetime.datetime.today().timetuple())): lastTime = 0
+        except RecordNotFound:
             lastTime = 0
 
         return datetime.datetime.fromtimestamp(lastTime)
 
-    def _getLastSearch(self):
-        myDB = self._getDB()
-        sqlResults = myDB.select("SELECT time FROM lastSearch WHERE provider = ?", [self.providerID])
+    @last_update.setter
+    def last_update(self, toDate):
+        try:
+            dbData = sickrage.srCore.cacheDB.db.get('lastUpdate', self.providerID, with_doc=True)['doc']
+            dbData['time'] = int(time.mktime(toDate.timetuple()))
+            sickrage.srCore.cacheDB.db.update(dbData)
+        except RecordNotFound:
+            sickrage.srCore.cacheDB.db.insert({
+                '_t': 'lastUpdate',
+                'provider': self.providerID,
+                'time': int(time.mktime(toDate.timetuple()))
+            })
 
-        if sqlResults:
-            lastTime = int(sqlResults[0]["time"])
-            if lastTime > int(time.mktime(datetime.datetime.today().timetuple())):
-                lastTime = 0
-        else:
+    @property
+    def last_search(self):
+        try:
+            dbData = sickrage.srCore.cacheDB.db.get('lastSearch', self.providerID, with_doc=True)['doc']
+            lastTime = int(dbData["time"])
+            if lastTime > int(time.mktime(datetime.datetime.today().timetuple())): lastTime = 0
+        except RecordNotFound:
             lastTime = 0
 
         return datetime.datetime.fromtimestamp(lastTime)
 
-    def setLastUpdate(self, toDate=None):
-        if not toDate:
-            toDate = datetime.datetime.today()
+    @last_search.setter
+    def last_search(self, toDate):
+        try:
+            dbData = sickrage.srCore.cacheDB.db.get('lastSearch', self.providerID, with_doc=True)['doc']
+            dbData['time'] = int(time.mktime(toDate.timetuple()))
+            sickrage.srCore.cacheDB.db.update(dbData)
+        except RecordNotFound:
+            sickrage.srCore.cacheDB.db.insert({
+                '_t': 'lastUpdate',
+                'provider': self.providerID,
+                'time': int(time.mktime(toDate.timetuple()))
+            })
 
-        myDB = self._getDB()
-        myDB.upsert("lastUpdate",
-                    {'time': int(time.mktime(toDate.timetuple()))},
-                    {'provider': self.providerID})
-
-    def setLastSearch(self, toDate=None):
-        if not toDate:
-            toDate = datetime.datetime.today()
-
-        myDB = self._getDB()
-        myDB.upsert("lastSearch",
-                    {'time': int(time.mktime(toDate.timetuple()))},
-                    {'provider': self.providerID})
-
-    lastUpdate = property(_getLastUpdate)
-    lastSearch = property(_getLastSearch)
-
-    def shouldUpdate(self):
+    def should_update(self):
         # if we've updated recently then skip the update
-        if datetime.datetime.today() - self.lastUpdate < datetime.timedelta(minutes=self.minTime):
-            sickrage.srCore.srLogger.debug(
-                "Last update was too soon, using old tv cache: " + str(self.lastUpdate) + ". Updated less then " + str(
-                    self.minTime) + " minutes ago")
+        if datetime.datetime.today() - self.last_update < datetime.timedelta(minutes=self.min_time):
             return False
-
         return True
 
     def shouldClearCache(self):
         # if daily search hasn't used our previous results yet then don't clear the cache
-        if self.lastUpdate > self.lastSearch:
+        if self.last_update > self.last_search:
             return False
-
         return True
 
-    def _addCacheEntry(self, name, url, parse_result=None, indexer_id=0):
-
+    def addCacheEntry(self, name, url, parse_result=None, indexer_id=0):
         # check if we passed in a parsed result or should we try and create one
         if not parse_result:
-
             # create showObj from indexer_id if available
             showObj = None
             if indexer_id:
@@ -249,12 +185,14 @@ class TVCache(object):
             try:
                 myParser = NameParser(showObj=showObj)
                 parse_result = myParser.parse(name)
+                if not parse_result:
+                    return
             except (InvalidShowException, InvalidNameException):
                 sickrage.srCore.srLogger.debug("RSS ITEM:[{}] IGNORED!".format(name))
                 return
 
-            if not parse_result or not parse_result.series_name:
-                return
+        if not parse_result.series_name:
+            return
 
         # if we made it this far then lets add the parsed result to cache for usager later on
         season = parse_result.season_number if parse_result.season_number else 1
@@ -276,51 +214,43 @@ class TVCache(object):
             # get version
             version = parse_result.version
 
-            sickrage.srCore.srLogger.debug("RSS ITEM:[{}] ADDED!".format(name))
+            if not len([x for x in sickrage.srCore.cacheDB.db.get_many('providers', self.providerID, with_doc=True)
+                        if x['doc']['url'] == url]):
+                sickrage.srCore.cacheDB.db.insert({
+                    '_t': 'providers',
+                    'provider': self.providerID,
+                    'name': name,
+                    'season': season,
+                    'episodes': episodeText,
+                    'indexerid': parse_result.show.indexerid,
+                    'url': url,
+                    'time': curTimestamp,
+                    'quality': quality,
+                    'release_group': release_group,
+                    'version': version
+                })
 
-            return [
-                "INSERT OR IGNORE INTO [" + self.providerID + "] (name, season, episodes, indexerid, url, time, quality, release_group, version) VALUES (?,?,?,?,?,?,?,?,?)",
-                [name, season, episodeText, parse_result.show.indexerid, url, curTimestamp, quality, release_group,
-                 version]]
+                sickrage.srCore.srLogger.debug("RSS ITEM:[%s] ADDED!", name)
 
-    def searchCache(self, episode, manualSearch=False, downCurQuality=False):
-        neededEps = self.findNeededEpisodes(episode, manualSearch, downCurQuality)
-        return neededEps[episode] if episode in neededEps else []
+    def list_propers(self, date=None):
+        return [x['doc'] for x in sickrage.srCore.cacheDB.db.get_many('providers', self.providerID, with_doc=True)
+                if ('.PROPER.' in x['doc']['name'] or '.REPACK.' in x['doc']['name'])
+                and x['doc']['time'] >= str(int(time.mktime(date.timetuple())))
+                and x['doc']['indexerid']]
 
-    def listPropers(self, date=None):
-        myDB = self._getDB()
-        sql = "SELECT * FROM [" + self.providerID + "] WHERE name LIKE '%.PROPER.%' OR name LIKE '%.REPACK.%'"
-
-        if date is not None:
-            sql += " AND time >= " + str(int(time.mktime(date.timetuple())))
-
-        propers_results = myDB.select(sql)
-        return [x for x in propers_results if x['indexerid']]
-
-    def findNeededEpisodes(self, episode, manualSearch=False, downCurQuality=False):
-        sqlResults = []
+    def search_cache(self, episode=None, manualSearch=False, downCurQuality=False):
         neededEps = {}
-        cl = []
 
         if not episode:
-            sqlResults = self._getDB().select("SELECT * FROM [" + self.providerID + "]")
-        elif type(episode) != list:
-            sqlResults = self._getDB().select(
-                    "SELECT * FROM [" + self.providerID + "] WHERE indexerid = ? AND season = ? AND episodes LIKE ?",
-                    [episode.show.indexerid, episode.season, "%|" + str(episode.episode) + "|%"])
+            dbData = [x['doc'] for x in sickrage.srCore.cacheDB.db.get_many('providers', self.providerID, with_doc=True)]
         else:
-            for epObj in episode:
-                cl.append([
-                    "SELECT * FROM [" + self.providerID + "] WHERE indexerid = ? AND season = ? AND episodes LIKE ? AND quality IN (" + ",".join(
-                            [str(x) for x in epObj.wantedQuality]) + ")",
-                    [epObj.show.indexerid, epObj.season, "%|" + str(epObj.episode) + "|%"]])
-
-            if len(cl) > 0:
-                sqlResults = list(itertools.chain(*self._getDB().mass_action(cl)))
-                del cl  # cleanup
+            dbData = [x['doc'] for x in sickrage.srCore.cacheDB.db.get_many('providers', self.providerID, with_doc=True)
+                      if x['doc']['indexerid'] == episode.show.indexerid
+                      and x['doc']['season'] == episode.season
+                      and "|" + str(episode.episode) + "|" in x['doc']['episodes']]
 
         # for each cache entry
-        for curResult in sqlResults:
+        for curResult in dbData:
             # ignored/required words, and non-tv junk
             if not show_names.filterBadReleases(curResult["name"]):
                 continue
@@ -352,8 +282,9 @@ class TVCache(object):
 
             # if the show says we want that episode then add it to the list
             if not showObj.wantEpisode(curSeason, curEp, curQuality, manualSearch, downCurQuality):
-                sickrage.srCore.srLogger.info("Skipping " + curResult["name"] + " because we don't want an episode that's " +
-                                            Quality.qualityStrings[curQuality])
+                sickrage.srCore.srLogger.info(
+                    "Skipping " + curResult["name"] + " because we don't want an episode that's " +
+                    Quality.qualityStrings[curQuality])
                 continue
 
             epObj = showObj.getEpisode(curSeason, curEp)
@@ -372,14 +303,16 @@ class TVCache(object):
             result.release_group = curReleaseGroup
             result.version = curVersion
             result.content = None
+            result.size = self.provider._get_size(url)
+            result.files = self.provider._get_files(url)
 
             # add it to the list
             if epObj not in neededEps:
-                neededEps[epObj] = [result]
+                neededEps[epObj.episode] = [result]
             else:
-                neededEps[epObj].append(result)
+                neededEps[epObj.episode].append(result)
 
         # datetime stamp this search so cache gets cleared
-        self.setLastSearch()
+        self.last_search = datetime.datetime.today()
 
         return neededEps

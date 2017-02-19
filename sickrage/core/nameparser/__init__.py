@@ -1,7 +1,7 @@
-#!/usr/bin/env python2
+
 
 # Author: echel0n <echel0n@sickrage.ca>
-# URL: https://git.sickrage.ca
+# URL: https://sickrage.ca
 #
 # This file is part of SickRage.
 #
@@ -28,16 +28,14 @@ from dateutil import parser
 
 import sickrage
 from sickrage.core.common import Quality
-from sickrage.core.helpers import findCertainShow, full_sanitizeSceneName, \
-    get_all_episodes_from_absolute_number, remove_extension
+from sickrage.core.helpers import findCertainShow, full_sanitizeSceneName, get_all_episodes_from_absolute_number, \
+    remove_extension
 from sickrage.core.nameparser import regexes
 from sickrage.core.scene_exceptions import get_scene_exception_by_name
-from sickrage.core.scene_numbering import \
-    get_absolute_number_from_season_and_episode, get_indexer_absolute_numbering, \
+from sickrage.core.scene_numbering import get_absolute_number_from_season_and_episode, get_indexer_absolute_numbering, \
     get_indexer_numbering
 from sickrage.indexers import srIndexerApi
-from sickrage.indexers.exceptions import indexer_episodenotfound, \
-    indexer_error
+from sickrage.indexers.exceptions import indexer_episodenotfound, indexer_error
 
 
 class NameParser(object):
@@ -70,7 +68,7 @@ class NameParser(object):
 
         try:
             # check cache for show
-            cache = sickrage.srCore.NAMECACHE.retrieveNameFromCache(name)
+            cache = sickrage.srCore.NAMECACHE.get(name)
             if cache:
                 fromCache = True
                 showObj = findCertainShow(sickrage.srCore.SHOWLIST, int(cache))
@@ -88,7 +86,7 @@ class NameParser(object):
 
             # add show to cache
             if showObj and not fromCache:
-                sickrage.srCore.NAMECACHE.addNameToCache(name, showObj.indexerid)
+                sickrage.srCore.NAMECACHE.put(name, showObj.indexerid)
         except Exception as e:
             sickrage.srCore.srLogger.debug(
                 "Error when attempting to find show: %s in SiCKRAGE. Error: %r " % (name, repr(e)))
@@ -258,18 +256,18 @@ class NameParser(object):
 
             # if we have an air-by-date show then get the real season/episode numbers
             if bestResult.is_air_by_date:
-                from sickrage.core.databases import main_db
                 airdate = bestResult.air_date.toordinal()
-                sql_result = main_db.MainDB().select(
-                    "SELECT season, episode FROM tv_episodes WHERE showid = ? AND indexer = ? AND airdate = ?",
-                    [bestResult.show.indexerid, bestResult.show.indexer, airdate])
+
+                dbData = [x['doc'] for x in
+                          sickrage.srCore.mainDB.db.get_many('tv_episodes', bestResult.show.indexerid, with_doc=True)
+                          if x['doc']['indexer'] == bestResult.show.indexer and x['doc']['airdate'] == airdate]
 
                 season_number = None
                 episode_numbers = []
 
-                if sql_result:
-                    season_number = int(sql_result[0][0])
-                    episode_numbers = [int(sql_result[0][1])]
+                if dbData:
+                    season_number = int(dbData[0]['season'])
+                    episode_numbers = [int(dbData[0]['episode'])]
 
                 if not season_number or not len(episode_numbers):
                     try:
@@ -371,7 +369,7 @@ class NameParser(object):
                     "Converted parsed result {} into {}".format(bestResult.original_name, bestResult))
 
         # CPU sleep
-        time.sleep(1)
+        time.sleep(0.02)
 
         return bestResult
 

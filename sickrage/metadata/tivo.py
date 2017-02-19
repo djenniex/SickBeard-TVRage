@@ -1,6 +1,5 @@
 # Author: echel0n <echel0n@sickrage.ca>
-# Author: Gordon Turner <gordonturner@gordonturner.ca>
-# URL: http://github.com/SiCKRAGETV/SickRage/
+# URL: https://sickrage.ca
 #
 # This file is part of SickRage.
 #

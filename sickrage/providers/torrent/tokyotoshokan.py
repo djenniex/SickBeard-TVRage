@@ -1,5 +1,5 @@
 # Author: Mr_Orange
-# URL: http://github.com/SiCKRAGETV/SickRage/
+# URL: https://sickrage.ca
 #
 # This file is part of SickRage.
 #
@@ -30,17 +30,17 @@ from sickrage.providers import TorrentProvider
 class TokyoToshokanProvider(TorrentProvider):
     def __init__(self):
 
-        super(TokyoToshokanProvider, self).__init__("TokyoToshokan",'tokyotosho.info')
+        super(TokyoToshokanProvider, self).__init__("TokyoToshokan",'tokyotosho.info', False)
 
-        self.supportsBacklog = True
+        self.supports_backlog = True
 
-        self.supportsAbsoluteNumbering = True
+        self.supports_absolute_numbering = True
         self.anime_only = True
         self.ratio = None
 
-        self.cache = TokyoToshokanCache(self)
+        self.cache = TokyoToshokanCache(self, min_time=15)
 
-    def seedRatio(self):
+    def seed_ratio(self):
         return self.ratio
 
     def _get_season_search_strings(self, ep_obj):
@@ -111,18 +111,12 @@ class TokyoToshokanProvider(TorrentProvider):
 
 
 class TokyoToshokanCache(tv_cache.TVCache):
-    def __init__(self, provider_obj):
-        tv_cache.TVCache.__init__(self, provider_obj)
-
-        # only poll NyaaTorrents every 15 minutes max
-        self.minTime = 15
-
-    def _getRSSData(self):
+    def _get_rss_data(self):
         params = {
             "filter": '1',
         }
 
-        url = self.provider.url + 'rss.php?' + urllib.urlencode(params)
+        url = self.provider.urls['base_url'] + '/rss.php?' + urllib.urlencode(params)
 
         sickrage.srCore.srLogger.debug("Cache update URL: %s" % url)
 

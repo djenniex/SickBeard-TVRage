@@ -1,3 +1,21 @@
+# Author: echel0n <echel0n@sickrage.ca>
+# URL: https://sickrage.ca
+#
+# This file is part of SickRage.
+#
+# SickRage is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# SickRage is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with SickRage.  If not, see <http://www.gnu.org/licenses/>.
+
 from __future__ import unicode_literals
 
 import ast
@@ -16,6 +34,8 @@ import re
 import shutil
 import socket
 import stat
+import string
+import sys
 import tempfile
 import time
 import traceback
@@ -111,7 +131,7 @@ def autoType(s):
         except ValueError:
             pass
 
-    return (s, None)[s.lower() == "none"]
+    return (s, '')[s.lower() == "none"]
 
 
 def fixGlob(path):
@@ -272,7 +292,7 @@ def isMediaFile(filename):
         return False
 
     # ignore RARBG release intro
-    if re.search(r'^RARBG\.\w+\.(mp4|avi|txt)$', filename, re.I):
+    if re.search(r'^RARBG\.(\w+\.)?(mp4|avi|txt)$', filename, re.I):
         return False
 
     # ignore MAC OS's retarded "resource fork" files
@@ -366,21 +386,19 @@ def findCertainShow(showList, indexerid):
     :return: result list
     """
 
-    results = []
+    if indexerid is None or showList is None or len(showList) == 0:
+        return None
 
-    if not isinstance(indexerid, list):
-        indexerid = [indexerid]
-
-    if showList and indexerid:
-        results = [show for show in showList if show.indexerid in indexerid]
+    indexer_ids = [indexerid] if not isinstance(indexerid, list) else indexerid
+    results = [show for show in showList if show.indexerid in indexer_ids]
 
     if not results:
         return None
 
     if len(results) == 1:
         return results[0]
-    elif len(results) > 1:
-        raise MultipleShowObjectsException()
+
+    raise MultipleShowObjectsException()
 
 
 def makeDir(path):
@@ -597,7 +615,8 @@ def rename_ep_file(cur_path, new_path, old_path_length=0):
         sublang = os.path.splitext(cur_file_name)[1][1:]
 
         # Check if the language extracted from filename is a valid language
-        if sickrage.srCore.SUBTITLESEARCHER.isValidLanguage(sublang):
+        from sickrage.core.searchers import subtitle_searcher
+        if subtitle_searcher.isValidLanguage(sublang):
             cur_file_ext = '.' + sublang + cur_file_ext
 
     # put the extension on the incoming file
@@ -1145,7 +1164,6 @@ def backupSR(backupDir):
     filesList = ['sickrage.db',
                  'failed.db',
                  'cache.db',
-                 'thetvdb.db',
                  os.path.basename(sickrage.CONFIG_FILE)]
 
     for f in filesList:
@@ -1153,6 +1171,17 @@ def backupSR(backupDir):
         if os.path.exists(fp):
             source += [fp]
 
+    # database
+    for (path, dirs, files) in os.walk(os.path.join(sickrage.DATA_DIR, 'database'), topdown=True):
+        for filename in files:
+            source += [os.path.join(path, filename)]
+
+    # database backups
+    for (path, dirs, files) in os.walk(os.path.join(sickrage.DATA_DIR, 'db_backup'), topdown=True):
+        for filename in files:
+            source += [os.path.join(path, filename)]
+
+    # cache
     if sickrage.srCore.srConfig.CACHE_DIR:
         for (path, dirs, files) in os.walk(sickrage.srCore.srConfig.CACHE_DIR, topdown=True):
             for dirname in dirs:
@@ -1169,10 +1198,8 @@ def backupSR(backupDir):
 def restoreSR(srcDir, dstDir):
     try:
         filesList = ['sickrage.db',
-                     'sickbeard.db',
                      'failed.db',
                      'cache.db',
-                     'thetvdb.db',
                      os.path.basename(sickrage.CONFIG_FILE)]
 
         for filename in filesList:
@@ -1186,12 +1213,31 @@ def restoreSR(srcDir, dstDir):
                     moveFile(dstFile, bakFile)
                 moveFile(srcFile, dstFile)
 
+        # databse
+        if os.path.exists(os.path.join(srcDir, 'database')):
+            if os.path.exists(os.path.join(dstDir, 'database')):
+                moveFile(os.path.join(dstDir, 'database'), os.path.join(dstDir, '{}.bak-{}'
+                                                                     .format('database',
+                                                                             datetime.datetime.now().strftime(
+                                                                                 '%Y%m%d_%H%M%S'))))
+            moveFile(os.path.join(srcDir, 'database'), dstDir)
+
+        # databse backups
+        if os.path.exists(os.path.join(srcDir, 'db_backup')):
+            if os.path.exists(os.path.join(dstDir, 'db_backup')):
+                moveFile(os.path.join(dstDir, 'db_backup'), os.path.join(dstDir, '{}.bak-{}'
+                                                                     .format('db_backup',
+                                                                             datetime.datetime.now().strftime(
+                                                                                 '%Y%m%d_%H%M%S'))))
+            moveFile(os.path.join(srcDir, 'db_backup'), dstDir)
+
+        # cache
         if os.path.exists(os.path.join(srcDir, 'cache')):
             if os.path.exists(os.path.join(dstDir, 'cache')):
                 moveFile(os.path.join(dstDir, 'cache'), os.path.join(dstDir, '{}.bak-{}'
-                                                                        .format('cache',
-                                                                                datetime.datetime.now().strftime(
-                                                                                    '%Y%m%d_%H%M%S'))))
+                                                                     .format('cache',
+                                                                             datetime.datetime.now().strftime(
+                                                                                 '%Y%m%d_%H%M%S'))))
             moveFile(os.path.join(srcDir, 'cache'), dstDir)
 
         return True
@@ -1409,7 +1455,7 @@ def isFileLocked(checkfile, writeLockCheck=False):
             os.rename(checkfile, lockFile)
             time.sleep(1)
             os.rename(lockFile, checkfile)
-        except (Exception, OSError, IOError):
+        except (OSError, IOError):
             return True
 
     return False
@@ -1431,6 +1477,38 @@ def getDiskSpaceUsage(diskPath=None):
             return pretty_filesize(st.f_bavail * st.f_frsize)
     else:
         return False
+
+
+def getFreeSpace(directories):
+    single = not isinstance(directories, (tuple, list))
+    if single:
+        directories = [directories]
+
+    free_space = {}
+    for folder in directories:
+
+        size = None
+        if os.path.isdir(folder):
+            if os.name == 'nt':
+                _, total, free = ctypes.c_ulonglong(), ctypes.c_ulonglong(), \
+                                 ctypes.c_ulonglong()
+                if sys.version_info >= (3,) or isinstance(folder, unicode):
+                    fun = ctypes.windll.kernel32.GetDiskFreeSpaceExW  # @UndefinedVariable
+                else:
+                    fun = ctypes.windll.kernel32.GetDiskFreeSpaceExA  # @UndefinedVariable
+                ret = fun(folder, ctypes.byref(_), ctypes.byref(total), ctypes.byref(free))
+                if ret == 0:
+                    raise ctypes.WinError()
+                return [total.value, free.value]
+            else:
+                s = os.statvfs(folder)
+                size = [s.f_blocks * s.f_frsize / (1024 * 1024), (s.f_bavail * s.f_frsize) / (1024 * 1024)]
+
+        if single: return size
+
+        free_space[folder] = size
+
+    return free_space
 
 
 def removetree(tgt):
@@ -1626,3 +1704,7 @@ def convert_size(size, default=0):
     size *= 1024 ** units.index(unit.upper())
 
     return max(long(size), 0)
+
+
+def randomString(size=8, chars=string.ascii_uppercase + string.digits):
+    return ''.join(random.choice(chars) for x in range(size))

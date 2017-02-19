@@ -1,6 +1,6 @@
 ### Questions about SickRage?
 
-To get your questions answered, please ask on the [SickRage Forum](http://www.sickrage.ca/),  or [#sickrage](http://webchat.freenode.net/?channels=sickrage) IRC channel on irc.freenode.net
+To get your questions answered, please ask on the [SickRage Forum](https://www.sickrage.ca/),  or [#sickrage](http://webchat.freenode.net/?channels=sickrage) IRC channel on irc.freenode.net
 
 # Contributing to SickRage
 
@@ -19,7 +19,7 @@ The goal of this guide is to provide the best way to contribute to the official 
 
 ### Forum and IRC
 
-The SickRage development team frequently tracks posts on the [SickRage Forum](http://www.sickrage.ca/). If you have longer posts or questions please feel free to post them there. If you think you've found a bug please [file it in the bug tracker](#how-to-report-bugs).
+The SickRage development team frequently tracks posts on the [SickRage Forum](https://www.sickrage.ca/). If you have longer posts or questions please feel free to post them there. If you think you've found a bug please [file it in the bug tracker](#how-to-report-bugs).
 
 Additionally most of the SickRage development team can be found in the [#sickrage](http://webchat.freenode.net/?channels=sickrage) IRC channel on irc.freenode.net.
 
@@ -30,7 +30,7 @@ Additionally most of the SickRage development team can be found in the [#sickrag
 
 Many bugs reported are actually issues with the user mis-understanding of how something works (there are a bit of moving parts to an ideal setup) and most of the time can be fixed by just changing some settings to fit the users needs.
 
-If you are new to SickRage, it is usually a much better idea to ask for help first in the [Using SickRage Forum](http://www.sickrage.ca) or the [SickRage IRC channel](http://webchat.freenode.net/?channels=sickrage). You will get much quicker support, and you will help avoid tying up the SickRage team with invalid bug reports.
+If you are new to SickRage, it is usually a much better idea to ask for help first in the [Using SickRage Forum](https://www.sickrage.ca) or the [SickRage IRC channel](http://webchat.freenode.net/?channels=sickrage). You will get much quicker support, and you will help avoid tying up the SickRage team with invalid bug reports.
 
 ### Try the latest version of SickRage
 
@@ -49,14 +49,14 @@ Bugs in old versions of SickRage may have already been fixed. In order to avoid 
 
 Please follow these guidelines before reporting a bug:
 
-1. **Update to the latest version** &mdash; Check if you can reproduce the issue with the latest version from the `develop` branch.
+1. **Update to the latest version** - Check if you can reproduce the issue with the latest version from the `develop` branch.
 
-2. **Use the search on sickrage-issues** &mdash; check if the issue has already been reported. If it has been, please comment on the existing issue.
+2. **Use the search on sickrage issues** - check if the issue has already been reported. If it has been, please comment on the existing issue.
 
-3. **Provide a means to reproduce the problem** &mdash; Please provide as much details as possible, e.g. SickRage log files (obfuscate apikey/passwords), browser and operating system versions, how you started SickRage, and of course the steps to reproduce the problem. Bugs are always reported in the forums.
+3. **Provide a means to reproduce the problem** - Please provide as much details as possible, e.g. SickRage log files (obfuscate apikey/passwords), browser and operating system versions, how you started SickRage, and of course the steps to reproduce the problem. Bugs are always reported in the forums.
 
 ### Pull requests
-[Pull requests](https://help.github.com/articles/using-pull-requests) are welcome and the preferred way of accepting code contributions.
+[Pull requests](https://docs.gitlab.com/ee/gitlab-basics/add-merge-request.html) are welcome and the preferred way of accepting code contributions.
 
 Please follow these guidelines before sending a pull request:
 
@@ -74,16 +74,16 @@ Please follow these guidelines before sending a pull request:
 
 Please follow this process; it's the best way to get your work included in the project:
 
-- [Fork](http://help.github.com/fork-a-repo/) the project, clone your fork,
+- [Fork](https://docs.gitlab.com/ee/gitlab-basics/fork-project.html) the project, clone your fork,
    and configure the remotes:
 
 ```bash
    # clone your fork of the repo into the current directory in terminal
-   git clone git@github.com:<your username>/sickrage.git
+   git clone git@git.sickrage.ca:<your username>/sickrage.git
    # navigate to the newly cloned directory
    cd SickRage
    # assign the original repo to a remote called "upstream"
-   git remote add upstream https://github.com/SiCKRAGETV/sickrage.git
+   git remote add upstream https://git.sickrage.ca/SiCKRAGE/sickrage.git
    ```
 
 - If you cloned a while ago, get the latest changes from upstream:
@@ -114,7 +114,7 @@ Please follow this process; it's the best way to get your work included in the p
 
 - Commit your changes in logical chunks. or your pull request is unlikely
    be merged into the main project. Use git's
-   [interactive rebase](https://help.github.com/articles/interactive-rebase)
+   [interactive rebase](https://help.github.com/articles/about-git-rebase/)
    feature to tidy up your commits before making them public.
 
 - Push your topic branch up to your fork:
@@ -123,7 +123,7 @@ Please follow this process; it's the best way to get your work included in the p
    git push origin <topic-branch-name>
    ```
 
-- [Open a Pull Request](https://help.github.com/articles/using-pull-requests) with a
+- [Open a Pull Request](https://docs.gitlab.com/ee/gitlab-basics/add-merge-request.html) with a
     clear title and description.
 
 

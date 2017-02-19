@@ -1,7 +1,7 @@
-#!/usr/bin/env python2
+
 
 # Author: echel0n <echel0n@sickrage.ca>
-# URL: https://git.sickrage.ca
+# URL: https://sickrage.ca
 #
 # This file is part of SickRage.
 #
@@ -20,6 +20,7 @@
 
 from __future__ import unicode_literals
 
+import datetime
 import re
 import urllib
 
@@ -30,16 +31,15 @@ from sickrage.providers import NZBProvider
 
 class BinSearchProvider(NZBProvider):
     def __init__(self):
-        super(BinSearchProvider, self).__init__("BinSearch", 'www.binsearch.info')
+        super(BinSearchProvider, self).__init__("BinSearch", 'www.binsearch.info', False)
 
         self.cache = BinSearchCache(self)
 
 
 class BinSearchCache(tv_cache.TVCache):
     def __init__(self, provider_obj):
-        tv_cache.TVCache.__init__(self, provider_obj)
+        tv_cache.TVCache.__init__(self, provider_obj, min_time=30)
         # only poll Binsearch every 30 minutes max
-        self.minTime = 30
 
         # compile and save our regular expressions
 
@@ -77,19 +77,18 @@ class BinSearchCache(tv_cache.TVCache):
 
         return (title, url)
 
-    def updateCache(self):
+    def update(self):
         # check if we should update
-        if self.shouldUpdate():
+        if self.should_update():
             # clear cache
-            self._clearCache()
+            self.clear()
 
             # set updated
-            self.setLastUpdate()
+            self.last_update = datetime.datetime.today()
 
-            cl = []
             for group in ['alt.binaries.hdtv', 'alt.binaries.hdtv.x264', 'alt.binaries.tv', 'alt.binaries.tvseries',
                           'alt.binaries.teevee']:
-                url = self.provider.url + 'rss.php?'
+                url = self.provider.urls['base_url'] + '/rss.php?'
                 urlArgs = {'max': 1000, 'g': group}
 
                 url += urllib.urlencode(urlArgs)
@@ -97,15 +96,9 @@ class BinSearchCache(tv_cache.TVCache):
                 sickrage.srCore.srLogger.debug("Cache update URL: %s " % url)
 
                 for item in self.getRSSFeed(url)['entries'] or []:
-                    ci = self._parseItem(item)
-                    if ci is not None:
-                        cl.append(ci)
-
-            if len(cl) > 0:
-                self._getDB().mass_action(cl)
-                del cl  # cleanup
+                    self._parseItem(item)
 
         return True
 
-    def _checkAuth(self, data):
+    def check_auth(self, data):
         return data if data['feed'] and data['feed']['title'] != 'Invalid Link' else None

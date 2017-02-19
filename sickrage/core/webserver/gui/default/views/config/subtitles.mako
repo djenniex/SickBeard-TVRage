@@ -135,7 +135,7 @@ $("#subtitles_languages").tokenInput([${','.join("{\"id\": \"" + lang.opensubtit
                                         <span class="component-title">&nbsp;</span>
                                         <span class="component-desc">
                                             <ul>
-                                                    <li>See <a href="https://github.com/SiCKRAGETV/SiCKRAGE/wiki/Subtitle%20Scripts"><font color='red'><b>Wiki</b></font></a> for a script arguments description.</li>
+                                                    <li>See <a href="https://git.sickrage.ca/SiCKRAGE/sickrage/wikis/Subtitle%20Scripts"><font color='red'><b>Wiki</b></font></a> for a script arguments description.</li>
                                                     <li>Additional scripts separated by <b>|</b>.</li>
                                                     <li>Scripts are called after each episode has searched and downloaded subtitles.</li>
                                                     <li>For any scripted languages, include the interpreter executable before the script. See the following example:</li>
@@ -191,6 +191,7 @@ $("#subtitles_languages").tokenInput([${','.join("{\"id\": \"" + lang.opensubtit
                         <%
                             providerLoginDict = {
                                 'legendastv': {'user': sickrage.srCore.srConfig.LEGENDASTV_USER, 'pass': sickrage.srCore.srConfig.LEGENDASTV_PASS},
+                                'itasa': {'user': sickrage.srCore.srConfig.ITASA_USER, 'pass': sickrage.srCore.srConfig.ITASA_PASS},
                                 'addic7ed': {'user': sickrage.srCore.srConfig.ADDIC7ED_USER, 'pass': sickrage.srCore.srConfig.ADDIC7ED_PASS},
                                 'opensubtitles': {'user': sickrage.srCore.srConfig.OPENSUBTITLES_USER, 'pass': sickrage.srCore.srConfig.OPENSUBTITLES_PASS}}
                         %>

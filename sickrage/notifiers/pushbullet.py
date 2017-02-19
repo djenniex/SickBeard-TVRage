@@ -1,7 +1,7 @@
-#!/usr/bin/env python2
+
 
 # Author: echel0n <echel0n@sickrage.ca>
-# URL: https://git.sickrage.ca
+# URL: https://sickrage.ca
 #
 # This file is part of SickRage.
 #
@@ -90,7 +90,7 @@ class PushbulletNotifier(srNotifiers):
         headers = {'Content-Type': 'application/json', 'Authorization': 'Bearer %s' % pushbullet_api}
 
         try:
-            response = self.session.request(method, url, data=data, headers=headers)
+            response = sickrage.srCore.srWebSession.request(method, url, data=data, headers=headers)
         except Exception:
             sickrage.srCore.srLogger.debug('Pushbullet authorization failed with exception: %r' % traceback.format_exc())
             return False
@@ -99,7 +99,7 @@ class PushbulletNotifier(srNotifiers):
             sickrage.srCore.srLogger.debug('Pushbullet authorization failed')
             return False
 
-        if response.status_code != 200:
+        if not response.ok:
             sickrage.srCore.srLogger.debug('Pushbullet call failed with error code %r' % response.status_code)
             return False
 

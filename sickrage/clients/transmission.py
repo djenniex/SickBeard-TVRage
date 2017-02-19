@@ -1,5 +1,5 @@
 # Author: Mr_Orange <mr_orange@hotmail.it>
-# URL: http://github.com/SiCKRAGETV/SickRage/
+# URL: https://sickrage.ca
 #
 # This file is part of SickRage.
 #
@@ -46,7 +46,6 @@ class TransmissionAPI(GenericClient):
                                                           data=json.dumps({'method': 'session-get',}),
                                                           timeout=120,
                                                           auth=(self.username, self.password),
-                                                          raise_exceptions=False,
                                                           verify=bool(sickrage.srCore.srConfig.TORRENT_VERIFY_CERT))
 
         # get auth session header

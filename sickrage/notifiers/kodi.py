@@ -1,5 +1,5 @@
 # Author: echel0n <echel0n@sickrage.ca>
-# URL: http://github.com/SiCKRAGETV/SickRage/
+# URL: https://sickrage.ca
 #
 # This file is part of SickRage.
 #
@@ -35,7 +35,7 @@ from sickrage.notifiers import srNotifiers
 
 
 class KODINotifier(srNotifiers):
-    sr_logo_url = 'http://www.sickrage.ca/favicon.ico'
+    sr_logo_url = 'https://www.sickrage.ca/favicon.ico'
 
     def _get_kodi_version(self, host, username, password):
         """Returns KODI JSON-RPC API version (odd # = dev, even # = stable)
@@ -562,7 +562,7 @@ class KODINotifier(srNotifiers):
                     if sickrage.srCore.srConfig.KODI_ALWAYS_ON:
                         sickrage.srCore.srLogger.warning(
                             "Failed to detect KODI version for '" + host + "', check configuration and try again.")
-                    result = result + 1
+                    result += 1
 
             # needed for the 'update kodi' submenu command
             # as it only cares of the final result vs the individual ones

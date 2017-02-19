@@ -1,7 +1,7 @@
-#!/usr/bin/env python2
+
 
 # Author: echel0n <echel0n@sickrage.ca>
-# URL: http://github.com/SiCKRAGETV/SickRage/
+# URL: https://sickrage.ca
 #
 # This file is part of SickRage.
 #
@@ -22,11 +22,11 @@ from __future__ import unicode_literals
 
 import datetime
 import os
+import posixpath
 import re
 
 import sickrage
 from sickrage.core.helpers import bs4_parser
-
 
 
 class imdbPopular(object):
@@ -43,67 +43,54 @@ class imdbPopular(object):
             'year': '%s,%s' % (datetime.date.today().year - 1, datetime.date.today().year + 1)
         }
 
-        self.session = sickrage.srCore.srWebSession
-
     def fetch_popular_shows(self):
         """Get popular show information from IMDB"""
 
         popular_shows = []
 
-        data = self.session.get(self.url, headers={'Referer': 'http://akas.imdb.com/'}, params=self.params).text
-        if not data:
+        try:
+            data = sickrage.srCore.srWebSession.get(self.url, headers={'Referer': 'http://akas.imdb.com/'}, params=self.params).text
+        except Exception:
             return None
 
         with bs4_parser(data) as soup:
-            results = soup.find("table", {"class": "results"}).find_all("tr")
-
-            for result in results:
+            for row in soup.find_all("div", {"class": "lister-item"}):
                 show = {}
-                image_td = result.find("td", {"class": "image"})
-
-                if image_td:
-                    image = image_td.find("img")
-                    show['image_url_large'] = self.change_size(image['src'], 3)
-                    show['image_path'] = os.path.join('images', 'imdb_popular',
-                                                       os.path.basename(show['image_url_large']))
-
+                image_div = row.find("div", {"class": "lister-item-image"})
+                if image_div:
+                    image = image_div.find("img")
+                    show['image_url_large'] = self.change_size(image['loadlate'], 3)
+                    show['imdb_tt'] = image['data-tconst']
+                    show['image_path'] = posixpath.join('images', 'imdb_popular',
+                                                        os.path.basename(show['image_url_large']))
                     self.cache_image(show['image_url_large'])
 
-                td = result.find("td", {"class": "title"})
+                content = row.find("div", {"class": "lister-item-content"})
+                if content:
+                    header = row.find("h3", {"class": "lister-item-header"})
+                    if header:
+                        a_tag = header.find("a")
+                        if a_tag:
+                            show['name'] = a_tag.get_text(strip=True)
+                            show['imdb_url'] = "http://www.imdb.com" + a_tag["href"]
+                            show['year'] = header.find("span", {"class": "lister-item-year"}).contents[0].split(" ")[0][
+                                           1:].strip("-")
 
-                if td:
-                    show['name'] = td.find("a").contents[0]
-                    show['imdb_url'] = "http://www.imdb.com" + td.find("a")["href"]
-                    show['imdb_tt'] = show['imdb_url'][-10:][0:9]
-                    show['year'] = td.find("span", {"class": "year_type"}).contents[0].split(" ")[0][1:]
+                    imdb_rating = row.find("div", {"class": "ratings-imdb-rating"})
+                    show['rating'] = imdb_rating['data-value'] if imdb_rating else None
 
-                    rating_all = td.find("div", {"class": "user_rating"})
-                    if rating_all:
-                        rating_string = rating_all.find("div", {"class": "rating rating-list"})
-                        if rating_string:
-                            rating_string = rating_string['title']
+                    votes = row.find("span", {"name": "nv"})
+                    show['votes'] = votes['data-value'] if votes else None
 
-                            match = re.search(r".* (.*)\/10.*\((.*)\).*", rating_string)
-                            if match:
-                                matches = match.groups()
-                                show['rating'] = matches[0]
-                                show['votes'] = matches[1]
-                            else:
-                                show['rating'] = None
-                                show['votes'] = None
-                    else:
-                        show['rating'] = None
-                        show['votes'] = None
-
-                    outline = td.find("span", {"class": "outline"})
-                    if outline:
-                        show['outline'] = outline.contents[0]
+                    outline = content.find_all("p", {"class": "text-muted"})
+                    if outline and len(outline) >= 2:
+                        show['outline'] = outline[1].contents[0].strip("\"")
                     else:
                         show['outline'] = ''
 
                     popular_shows.append(show)
 
-        return popular_shows
+            return popular_shows
 
     @staticmethod
     def change_size(image_url, factor=3):
@@ -137,4 +124,4 @@ class imdbPopular(object):
         full_path = os.path.join(path, os.path.basename(image_url))
 
         if not os.path.isfile(full_path):
-            self.session.download(image_url, full_path)
+            sickrage.srCore.srWebSession.download(image_url, full_path)

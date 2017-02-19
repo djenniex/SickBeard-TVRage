@@ -36,7 +36,7 @@
                                     <input type="hidden" name="show" value="${show.indexerid}"/>
                                     <input type="text" name="location" id="location" value="${show.location}"
                                            class="form-control form-control-inline input-sm input350"
-                                           autocapitalize="off"/>
+                                           autocapitalize="off" required=""/>
                                 </span>
                                     </label>
                                 </div>
@@ -88,10 +88,11 @@
                                     <label for="indexerLangSelect">
                                         <span class="component-title">Info Language</span>
                                         <span class="component-desc">
+                                            <% languages = srIndexerApi().indexer().languages.keys() %>
                                             <select name="indexerLang" id="indexerLangSelect"
                                                     class="form-control form-control-inline input-sm bfh-languages"
                                                     data-language="${show.lang}"
-                                                    data-available="${','.join(srIndexerApi().config['valid_languages'])}"></select>
+                                                    data-available="${','.join(languages)}"></select>
                                             <div class="clear-left"><p>This only applies to episode filenames and the
                                                 contents
                                                 of metadata files.</p></div>
@@ -104,7 +105,7 @@
                                         <span class="component-title">Subtitles</span>
                                         <span class="component-desc">
                                             <input type="checkbox" id="subtitles"
-                                                   name="subtitles" ${('', 'checked="checked')[show.subtitles == 1 and sickrage.srCore.srConfig.USE_SUBTITLES == True]} ${('disabled="disabled', '')[bool(sickrage.srCore.srConfig.USE_SUBTITLES)]}/> search for subtitles
+                                                   name="subtitles" ${('', 'checked="checked')[show.subtitles == 1 and sickrage.srCore.srConfig.USE_SUBTITLES == True]} ${('disabled="disabled"', '')[bool(sickrage.srCore.srConfig.USE_SUBTITLES)]}/> search for subtitles
                                         </span>
                                     </label>
                                 </div>
@@ -114,7 +115,9 @@
                                         <span class="component-title">Paused</span>
                                         <span class="component-desc">
                                             <input type="checkbox" id="paused"
-                                                   name="paused" ${('', 'checked="checked"')[show.paused == 1]} /> pause this show (SickRage will not download episodes)
+                                                   name="paused" ${('', 'checked="checked"')[show.paused == 1]} />
+                                            <div class="clear-left"><p>pause this show (SickRage will not download episodes)
+                                                </p></div>
                                         </span>
                                     </label>
                                 </div>
@@ -133,7 +136,7 @@
                                         <span class="component-title">Air by date</span>
                                         <span class="component-desc">
                                             <input type="checkbox" id="airbydate"
-                                                   name="air_by_date" ${('', 'checked="checked"')[show.air_by_date == 1]} /> check if the show is released as Show.03.02.2010 rather than Show.S02E03.<br>
+                                                   name="air_by_date" ${('', 'checked="checked"')[show.air_by_date == 1]} /> check if the show is released as Show.03.02.2010 rather than Show.S02E03.<br/>
                                             <span style="color:red">In case of an air date conflict between regular and special episodes, the later will be ignored.</span>
                                         </span>
                                     </label>

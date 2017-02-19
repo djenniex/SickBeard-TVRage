@@ -1,7 +1,5 @@
-#!/usr/bin/env python2
-# -*- coding: utf-8 -*-
 # Author: echel0n <echel0n@sickrage.ca>
-# URL: https://git.sickrage.ca
+# URL: https://sickrage.ca
 #
 # This file is part of SickRage.
 #
@@ -21,16 +19,17 @@
 from __future__ import print_function, unicode_literals, with_statement
 
 import argparse
+import atexit
 import codecs
 import io
 import locale
-import logging
 import os
+import site
 import sys
 import threading
 import time
 import traceback
-import site
+from signal import SIGTERM
 
 __all__ = [
     'srCore',
@@ -42,8 +41,9 @@ __all__ = [
     'PID_FILE'
 ]
 
-status = None
+restart = True
 srCore = None
+daemon = None
 
 MAIN_DIR = os.path.abspath(os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
 PROG_DIR = os.path.abspath(os.path.dirname(os.path.realpath(__file__)))
@@ -66,6 +66,122 @@ time.strptime("2012", "%Y")
 
 # set thread name
 threading.currentThread().setName('MAIN')
+
+
+class Daemon(object):
+    """
+    Usage: subclass the Daemon class
+    """
+
+    def __init__(self, pidfile):
+        self.stdin = getattr(os, 'devnull', '/dev/null')
+        self.stdout = getattr(os, 'devnull', '/dev/null')
+        self.stderr = getattr(os, 'devnull', '/dev/null')
+        self.pidfile = pidfile
+
+    def daemonize(self):
+        """
+        do the UNIX double-fork magic, see Stevens' "Advanced
+        Programming in the UNIX Environment" for details (ISBN 0201563177)
+        http://www.erlenstar.demon.co.uk/unix/faq_2.html#SEC16
+        """
+        try:
+            pid = os.fork()
+            if pid > 0:
+                # exit first parent
+                sys.exit(0)
+        except OSError, e:
+            sys.stderr.write("fork #1 failed: %d (%s)\n" % (e.errno, e.strerror))
+            sys.exit(1)
+
+        # decouple from parent environment
+        os.chdir("/")
+        os.setsid()
+        os.umask(0)
+
+        # do second fork
+        try:
+            pid = os.fork()
+            if pid > 0:
+                # exit from second parent
+                sys.exit(0)
+        except OSError, e:
+            sys.stderr.write("fork #2 failed: %d (%s)\n" % (e.errno, e.strerror))
+            sys.exit(1)
+
+        print("Daemonized successfully, pid %s" % os.getpid())
+
+        # redirect standard file descriptors
+        sys.stdin = sys.__stdin__
+        sys.stdout = sys.__stdout__
+        sys.stderr = sys.__stderr__
+        sys.stdout.flush()
+        sys.stderr.flush()
+        si = file(self.stdin, 'r')
+        so = file(self.stdout, 'a+')
+        se = file(self.stderr, 'a+', 0)
+        os.dup2(si.fileno(), sys.stdin.fileno())
+        os.dup2(so.fileno(), sys.stdout.fileno())
+        os.dup2(se.fileno(), sys.stderr.fileno())
+
+        # write pidfile
+        atexit.register(self.delpid)
+        pid = str(os.getpid())
+        file(self.pidfile, 'w+').write("%s\n" % pid)
+
+    def delpid(self):
+        if os.path.exists(self.pidfile):
+            os.remove(self.pidfile)
+
+    def start(self):
+        """
+        Start the daemon
+        """
+        # Check for a pidfile to see if the daemon already runs
+        try:
+            pf = file(self.pidfile, 'r')
+            pid = int(pf.read().strip())
+            pf.close()
+        except IOError:
+            pid = None
+
+        if pid:
+            message = "pidfile %s already exist. Daemon already running?\n"
+            sys.stderr.write(message % self.pidfile)
+            sys.exit(1)
+
+        # Start the daemon
+        self.daemonize()
+
+    def stop(self):
+        """
+        Stop the daemon
+        """
+
+        # Get the pid from the pidfile
+        try:
+            pf = file(self.pidfile, 'r')
+            pid = int(pf.read().strip())
+            pf.close()
+        except IOError:
+            pid = None
+
+        if not pid:
+            message = "pidfile %s does not exist. Daemon not running?\n"
+            sys.stderr.write(message % self.pidfile)
+            return  # not an error in a restart
+
+        # Try killing the daemon process
+        try:
+            while 1:
+                os.kill(pid, SIGTERM)
+                time.sleep(0.1)
+        except OSError, err:
+            err = str(err)
+            if err.find("No such process") > 0:
+                self.delpid()
+            else:
+                sys.exit(1)
 
 
 def encodingInit():
@@ -103,71 +219,6 @@ def isVirtualEnv():
     return hasattr(sys, 'real_prefix')
 
 
-def daemonize(pidfile):
-    try:
-        pid = os.fork()
-        if pid > 0:
-            # Exit from first parent
-            sys.exit(0)
-    except OSError as e:
-        sys.stderr.write("Fork #1 failed: %d (%s)\n" % (e.errno, e.strerror))
-        sys.exit(1)
-
-    # Decouple from parent environment
-    os.chdir("/")
-    os.setsid()
-    os.umask(0)
-
-    # Second fork
-    try:
-        pid = os.fork()
-        if pid > 0:
-            # Exit from second parent
-            sys.exit(0)
-    except OSError as e:
-        sys.stderr.write("Fork #2 failed: %d (%s)\n" % (e.errno, e.strerror))
-        sys.exit(1)
-
-    print("Daemonized successfully, pid %s" % os.getpid())
-
-    if sys.platform != 'darwin':
-        # Redirect standard file descriptors
-        sys.stdin = sys.__stdin__
-        sys.stdout = sys.__stdout__
-        sys.stderr = sys.__stderr__
-        sys.stdout.flush()
-        sys.stderr.flush()
-        si = file(getattr(os, 'devnull', '/dev/null'), 'r')
-        so = file(getattr(os, 'devnull', '/dev/null'), 'a+')
-        se = file(getattr(os, 'devnull', '/dev/null'), 'a+', 0)
-        os.dup2(si.fileno(), sys.stdin.fileno())
-        os.dup2(so.fileno(), sys.stdout.fileno())
-        os.dup2(se.fileno(), sys.stderr.fileno())
-
-    # Write the PID file
-    import atexit
-    atexit.register(lambda: delpid(pidfile))
-    io.open(pidfile, 'w+').write("%s\n" % str(os.getpid()))
-
-
-def delpid(pidfile):
-    # Removes the PID file
-    if pidfile and os.path.exists(pidfile):
-        os.remove(pidfile)
-
-
-def pid_exists(pid):
-    """Check whether pid exists in the current process table."""
-    if pid < 0:
-        return False
-    try:
-        os.kill(pid, 0)
-    except OSError as e:
-        return False
-    else:
-        return True
-
-
 def check_requirements():
     # sickrage requires python 2.7+
     if sys.version_info < (2, 7):
@@ -186,7 +237,7 @@ def check_requirements():
         v = OpenSSL.__version__
         v_needed = '0.15'
 
-        if v >= v_needed:
+        if not v >= v_needed:
             print('OpenSSL installed but {} is needed while {} is installed. Run `pip install -U pyopenssl`'.format(
                 v_needed, v))
     except:
@@ -201,7 +252,7 @@ def version():
 
 
 def main():
-    global srCore, status, SYS_ENCODING, MAIN_DIR, PROG_DIR, DATA_DIR, CONFIG_FILE, PID_FILE, DEVELOPER, \
+    global srCore, daemon, SYS_ENCODING, MAIN_DIR, PROG_DIR, DATA_DIR, CONFIG_FILE, PID_FILE, DEVELOPER, \
         DEBUG, DAEMONIZE, WEB_PORT, NOLAUNCH, QUITE
 
     try:
@@ -290,39 +341,29 @@ def main():
         if not os.access(DATA_DIR, os.W_OK):
             sys.exit("Data directory must be writeable '" + DATA_DIR + "'")
 
-        # Pidfile for daemon
-        if os.path.exists(PID_FILE):
-            if pid_exists(int(io.open(PID_FILE).read())):
-                sys.exit("PID file: " + PID_FILE + " already exists. Exiting.")
-
-            # remove stale pidfile
-            delpid(PID_FILE)
-
         # daemonize if requested
         if DAEMONIZE:
             NOLAUNCH = False
             QUITE = False
-            daemonize(PID_FILE)
+            daemon = Daemon(PID_FILE)
+            daemon.daemonize()
 
         # main app loop
-        while True:
+        while restart:
             srCore = core.Core()
             srCore.start()
+            srCore.shutdown()
+    except (SystemExit, KeyboardInterrupt):
+        try:
+            srCore.shutdown()
+        except:
+            pass
     except ImportError:
         traceback.print_exc()
         if os.path.isfile(REQS_FILE):
             print("Failed to import required libs, please run 'pip install -r {}' from console".format(REQS_FILE))
-    except KeyboardInterrupt:
-        pass
-    except Exception as e:
+    except:
         traceback.print_exc()
-        if srCore:
-            srCore.srLogger.debug(traceback.format_exc())
-            status = e.message
-    finally:
-        if srCore:
-            srCore.shutdown(status)
-
 
 if __name__ == '__main__':
     main()

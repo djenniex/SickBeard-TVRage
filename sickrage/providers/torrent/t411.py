@@ -1,7 +1,7 @@
-#!/usr/bin/env python2
+
 
 # Author: echel0n <echel0n@sickrage.ca>
-# URL: https://git.sickrage.ca
+# URL: https://sickrage.ca
 #
 # This file is part of SickRage.
 #
@@ -26,15 +26,15 @@ import traceback
 from requests.auth import AuthBase
 
 import sickrage
-from sickrage.core.caches import tv_cache
+from sickrage.core.caches.tv_cache import TVCache
 from sickrage.providers import TorrentProvider
 
 
 class T411Provider(TorrentProvider):
     def __init__(self):
-        super(T411Provider, self).__init__("T411",'www.t411.ch')
+        super(T411Provider, self).__init__("T411",'www.t411.li', True)
 
-        self.supportsBacklog = True
+        self.supports_backlog = True
 
         self.username = None
         self.password = None
@@ -42,7 +42,7 @@ class T411Provider(TorrentProvider):
         self.token = None
         self.tokenLastUpdate = None
 
-        self.cache = T411Cache(self)
+        self.cache = TVCache(self, min_time=10)
 
         self.urls.update({
             'search': '{base_url}/torrents/search/%s?cid=%s&limit=100'.format(base_url=self.urls['base_url']),
@@ -57,7 +57,7 @@ class T411Provider(TorrentProvider):
         self.minleech = 0
         self.confirmed = False
 
-    def _doLogin(self):
+    def login(self):
 
         if self.token is not None:
             if time.time() < (self.tokenLastUpdate + 30 * 60):
@@ -86,7 +86,7 @@ class T411Provider(TorrentProvider):
         results = []
         items = {'Season': [], 'Episode': [], 'RSS': []}
 
-        if not self._doLogin():
+        if not self.login():
             return results
 
         for mode in search_params.keys():
@@ -170,7 +170,7 @@ class T411Provider(TorrentProvider):
 
         return results
 
-    def seedRatio(self):
+    def seed_ratio(self):
         return self.ratio
 
 
@@ -183,15 +183,3 @@ class T411Auth(AuthBase):
     def __call__(self, r):
         r.headers['Authorization'] = self.token
         return r
-
-
-class T411Cache(tv_cache.TVCache):
-    def __init__(self, provider_obj):
-        tv_cache.TVCache.__init__(self, provider_obj)
-
-        # Only poll T411 every 10 minutes max
-        self.minTime = 10
-
-    def _getRSSData(self):
-        search_params = {'RSS': ['']}
-        return {'entries': self.provider.search(search_params)}

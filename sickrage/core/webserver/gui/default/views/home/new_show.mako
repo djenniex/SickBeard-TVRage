@@ -4,6 +4,12 @@
     from sickrage.core.helpers import anon_url
     from sickrage.indexers import srIndexerApi
 %>
+
+<%block name="metas">
+    <meta data-var="sickrage.DEFAULT_LANGUAGE" data-content="${sickrage.srCore.srConfig.INDEXER_DEFAULT_LANGUAGE}">
+    <meta data-var="sickrage.LANGUAGES" data-content="${','.join(srIndexerApi().indexer().languages.keys())}">
+</%block>
+
 <%block name="content">
 
     <div id="newShowPortal">
@@ -43,13 +49,10 @@
                         <br/>
                         <label for="indexerLang">
                             <select name="indexerLang" id="indexerLang"
-                                    class="form-control form-control-inline input-sm bfh-languages"
-                                    data-blank="false"
-                                    data-language="${sickrage.srCore.srConfig.INDEXER_DEFAULT_LANGUAGE}"
-                                    data-available="${','.join(srIndexerApi().config['valid_languages'])}">
+                                    class="form-control form-control-inline input-sm">
                             </select>
                         </label>
-                        <br/>
+                        <p>
                         <div id="messages"></div>
                         <br/>
                         <input class="btn btn-success btn-inline" type="button" id="searchName" value="Search"/>

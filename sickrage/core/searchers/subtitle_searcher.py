@@ -1,5 +1,5 @@
 # Author: Nyaran <nyayukko@gmail.com>, based on Antoine Bertin <diaoulael@gmail.com> work
-# URL: http://github.com/SiCKRAGETV/SickRage/
+# URL: https://sickrage.ca
 #
 # This file is part of SickRage.
 #
@@ -28,12 +28,10 @@ import traceback
 
 import babelfish
 import pkg_resources
+import sickrage
 import subliminal
 from enzyme import MKV, MalformedMKVError
-
-import sickrage
 from sickrage.core.common import dateTimeFormat
-from sickrage.core.databases import main_db
 from sickrage.core.helpers import findCertainShow, chmodAsParent, fixSetGroupID, makeDir
 
 distribution = pkg_resources.Distribution(location=os.path.dirname(os.path.dirname(__file__)),
@@ -57,21 +55,17 @@ entry_points = {
     ]
 }
 
-# pylint: disable=W0212
-# Access to a protected member of a client class
 distribution._ep_map = pkg_resources.EntryPoint.parse_map(entry_points, distribution)
 pkg_resources.working_set.add(distribution)
 
-# provider_manager.ENTRY_POINT_CACHE.pop('subliminal.providers')
-
-# subliminal.region.configure('dogpile.cache.memory')
-
-provider_urls = {
+PROVIDER_URLS = {
     'addic7ed': 'http://www.addic7ed.com',
+    'itasa': 'http://www.italiansubs.net/',
     'legendastv': 'http://www.legendas.tv',
     'napiprojekt': 'http://www.napiprojekt.pl',
     'opensubtitles': 'http://www.opensubtitles.org',
     'podnapisi': 'http://www.podnapisi.net',
+    'subscenter': 'http://www.subscenter.org',
     'thesubdb': 'http://www.thesubdb.com',
     'tvsubtitles': 'http://www.tvsubtitles.net'
 }
@@ -85,7 +79,7 @@ def sortedServiceList():
     for curService in sickrage.srCore.srConfig.SUBTITLES_SERVICES_LIST:
         if curService in subliminal.provider_manager.names():
             newList.append({'name': curService,
-                            'url': provider_urls[curService] if curService in provider_urls else lmgtfy % curService,
+                            'url': PROVIDER_URLS[curService] if curService in PROVIDER_URLS else lmgtfy % curService,
                             'image': curService + '.png',
                             'enabled': sickrage.srCore.srConfig.SUBTITLES_SERVICES_ENABLED[curIndex] == 1
                             })
@@ -94,7 +88,7 @@ def sortedServiceList():
     for curService in subliminal.provider_manager.names():
         if curService not in [x['name'] for x in newList]:
             newList.append({'name': curService,
-                            'url': provider_urls[curService] if curService in provider_urls else lmgtfy % curService,
+                            'url': PROVIDER_URLS[curService] if curService in PROVIDER_URLS else lmgtfy % curService,
                             'image': curService + '.png',
                             'enabled': False,
                             })
@@ -137,19 +131,24 @@ def downloadSubtitles(subtitles_info):
     providers = getEnabledServiceList()
 
     try:
-        video = subliminal.scan_video(video_path, subtitles=False, embedded_subtitles=False)
+        video = subliminal.scan_video(video_path)
     except Exception:
         sickrage.srCore.srLogger.debug('%s: Exception caught in subliminal.scan_video for S%02dE%02d' %
-                                     (subtitles_info['show.indexerid'], subtitles_info['season'], subtitles_info['episode']))
+                                       (subtitles_info['show.indexerid'], subtitles_info['season'],
+                                        subtitles_info['episode']))
         return existing_subtitles, None
 
     provider_configs = {
-        'addic7ed': {'username': sickrage.srCore.srConfig.ADDIC7ED_USER, 'password': sickrage.srCore.srConfig.ADDIC7ED_PASS},
-        'legendastv': {'username': sickrage.srCore.srConfig.LEGENDASTV_USER, 'password': sickrage.srCore.srConfig.LEGENDASTV_PASS},
+        'addic7ed': {'username': sickrage.srCore.srConfig.ADDIC7ED_USER,
+                     'password': sickrage.srCore.srConfig.ADDIC7ED_PASS},
+        'itasa': {'username': sickrage.srCore.srConfig.ITASA_USER,
+                  'password': sickrage.srCore.srConfig.ITASA_PASS},
+        'legendastv': {'username': sickrage.srCore.srConfig.LEGENDASTV_USER,
+                       'password': sickrage.srCore.srConfig.LEGENDASTV_PASS},
         'opensubtitles': {'username': sickrage.srCore.srConfig.OPENSUBTITLES_USER,
                           'password': sickrage.srCore.srConfig.OPENSUBTITLES_PASS}}
 
-    pool = subliminal.api.ProviderPool(providers=providers, provider_configs=provider_configs)
+    pool = subliminal.ProviderPool(providers=providers, provider_configs=provider_configs)
 
     try:
         subtitles_list = pool.list_subtitles(video, languages)
@@ -162,11 +161,13 @@ def downloadSubtitles(subtitles_info):
                                                        hearing_impaired=sickrage.srCore.srConfig.SUBTITLES_HEARING_IMPAIRED,
                                                        only_one=not sickrage.srCore.srConfig.SUBTITLES_MULTI)
 
-        save_subtitles(video, found_subtitles, directory=subtitles_path, single=not sickrage.srCore.srConfig.SUBTITLES_MULTI)
+        save_subtitles(video, found_subtitles, directory=subtitles_path,
+                       single=not sickrage.srCore.srConfig.SUBTITLES_MULTI)
 
         if not sickrage.srCore.srConfig.EMBEDDED_SUBTITLES_ALL and sickrage.srCore.srConfig.SUBTITLES_EXTRA_SCRIPTS and video_path.endswith(
                 ('.mkv', '.mp4')):
-            run_subs_extra_scripts(subtitles_info, found_subtitles, video, single=not sickrage.srCore.srConfig.SUBTITLES_MULTI)
+            run_subs_extra_scripts(subtitles_info, found_subtitles, video,
+                                   single=not sickrage.srCore.srConfig.SUBTITLES_MULTI)
 
         current_subtitles = subtitlesLanguages(video_path)[0]
         new_subtitles = frozenset(current_subtitles).difference(existing_subtitles)
@@ -352,7 +353,7 @@ def scan_subtitle_languages(path):
     subtitles = set()
     for p in os.listdir(dirpath):
         if not isinstance(p, bytes) and p.startswith(os.path.splitext(filename)[0]) and p.endswith(
-                subliminal.video.SUBTITLE_EXTENSIONS):
+                subliminal.SUBTITLE_EXTENSIONS):
             if os.path.splitext(p)[0].endswith(language_extensions) and len(
                     os.path.splitext(p)[0].rsplit('.', 1)[1]) is 2:
                 subtitles.add(babelfish.Language.fromopensubtitles(os.path.splitext(p)[0][-2:]))
@@ -416,25 +417,34 @@ class srSubtitleSearcher(object):
 
         today = datetime.date.today().toordinal()
 
-        # you have 5 minutes to understand that one. Good luck
+        results = []
+        for s in [s['doc'] for s in sickrage.srCore.mainDB.db.all('tv_shows', with_doc=True)]:
+            for e in [e['doc'] for e in sickrage.srCore.mainDB.db.get_many('tv_episodes', s['indexer_id'], with_doc=True)
+                      if s['subtitles'] == 1
+                      and e['doc']['location'] != ''
+                      and e['doc']['subtitles'] not in wantedLanguages()
+                      and (e['doc']['subtitles_searchcount'] <= 2 or (
+                                        e['doc']['subtitles_searchcount'] <= 7 and (today - e['doc']['airdate'])))]:
+                results += [{
+                    'show_name': s['show_name'],
+                    'showid': e['showid'],
+                    'season': e['season'],
+                    'episode': e['episode'],
+                    'status': e['status'],
+                    'subtitles': e['subtitles'],
+                    'searchcount': e['subtitles_searchcount'],
+                    'lastsearch': e['subtitles_lastsearch'],
+                    'location': e['location'],
+                    'airdate_daydiff': (today - e['airdate'])
+                }]
 
-
-        sqlResults = main_db.MainDB().select(
-            'SELECT s.show_name, e.showid, e.season, e.episode, e.status, e.subtitles, ' +
-            'e.subtitles_searchcount AS searchcount, e.subtitles_lastsearch AS lastsearch, e.location, (? - e.airdate) AS airdate_daydiff ' +
-            'FROM tv_episodes AS e INNER JOIN tv_shows AS s ON (e.showid = s.indexer_id) ' +
-            'WHERE s.subtitles = 1 AND e.subtitles NOT LIKE (?) ' +
-            'AND (e.subtitles_searchcount <= 2 OR (e.subtitles_searchcount <= 7 AND airdate_daydiff <= 7)) ' +
-            'AND e.location != ""', [today, wantedLanguages(True)])
-
-        if len(sqlResults) == 0:
+        if len(results) == 0:
             sickrage.srCore.srLogger.info('No subtitles to download')
             return
 
         rules = self._getRules()
         now = datetime.datetime.now()
-        for epToSub in sqlResults:
-
+        for epToSub in results:
             if not os.path.isfile(epToSub['location']):
                 sickrage.srCore.srLogger.debug(
                     'Episode file does not exist, cannot download subtitles for episode %dx%d of show %s' % (

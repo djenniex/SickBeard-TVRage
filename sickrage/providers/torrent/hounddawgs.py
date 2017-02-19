@@ -1,5 +1,5 @@
 # Author: Idan Gutman
-# URL: http://github.com/SiCKRAGETV/SickRage/
+# URL: https://sickrage.ca
 #
 # This file is part of SickRage.
 #
@@ -22,16 +22,16 @@ import re
 import traceback
 
 import sickrage
-from sickrage.core.caches import tv_cache
+from sickrage.core.caches.tv_cache import TVCache
 from sickrage.core.helpers import bs4_parser
 from sickrage.providers import TorrentProvider
 
 
 class HoundDawgsProvider(TorrentProvider):
     def __init__(self):
-        super(HoundDawgsProvider, self).__init__("HoundDawgs",'hounddawgs.org')
+        super(HoundDawgsProvider, self).__init__("HoundDawgs",'hounddawgs.org', True)
 
-        self.supportsBacklog = True
+        self.supports_backlog = True
 
         self.username = None
         self.password = None
@@ -39,7 +39,7 @@ class HoundDawgsProvider(TorrentProvider):
         self.minseed = None
         self.minleech = None
 
-        self.cache = HoundDawgsCache(self)
+        self.cache = TVCache(self, min_time=20)
 
         self.urls.update({
             'search': '{base_url}/torrents.php'.format(base_url=self.urls['base_url']),
@@ -62,7 +62,7 @@ class HoundDawgsProvider(TorrentProvider):
             "searchtags": ''
         }
 
-    def _doLogin(self):
+    def login(self):
 
         login_params = {'username': self.username,
                         'password': self.password,
@@ -88,7 +88,7 @@ class HoundDawgsProvider(TorrentProvider):
         results = []
         items = {'Season': [], 'Episode': [], 'RSS': []}
 
-        if not self._doLogin():
+        if not self.login():
             return results
 
         for mode in search_strings.keys():
@@ -175,17 +175,5 @@ class HoundDawgsProvider(TorrentProvider):
 
         return results
 
-    def seedRatio(self):
+    def seed_ratio(self):
         return self.ratio
-
-
-class HoundDawgsCache(tv_cache.TVCache):
-    def __init__(self, provider_obj):
-        tv_cache.TVCache.__init__(self, provider_obj)
-
-        # only poll HoundDawgs every 20 minutes max
-        self.minTime = 20
-
-    def _getRSSData(self):
-        search_strings = {'RSS': ['']}
-        return {'entries': self.provider.search(search_strings)}

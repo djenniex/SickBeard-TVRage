@@ -1,7 +1,7 @@
-#!/usr/bin/env python2
+
 
 # Author: echel0n <echel0n@sickrage.ca>
-# URL: https://git.sickrage.ca
+# URL: https://sickrage.ca
 #
 # This file is part of SickRage.
 #
@@ -41,13 +41,5 @@ indexerConfig = {
         'scene_loc': 'http://sickragetv.github.io/scene_exceptions/thetvdb.txt',
         'show_url': 'http://thetvdb.com/?tab=series&id=',
         'base_url': 'http://thetvdb.com/api/F9C450E78D99172E/series/',
-        'valid_languages': ["da", "fi", "nl", "de", "it", "es", "fr", "pl", "hu", "el", "tr",
-                            "ru", "he", "ja", "pt", "zh", "cs", "sl", "hr", "ko", "en", "sv", "no"
-                            ],
-        'langabbv_to_id': {'el': 20, 'en': 7, 'zh': 27,
-                           'it': 15, 'cs': 28, 'es': 16, 'ru': 22, 'nl': 13, 'pt': 26, 'no': 9,
-                           'tr': 21, 'pl': 18, 'fr': 17, 'hr': 31, 'de': 14, 'da': 10, 'fi': 11,
-                           'hu': 19, 'ja': 25, 'he': 24, 'ko': 32, 'sv': 8, 'sl': 30
-                           }
     }
 }

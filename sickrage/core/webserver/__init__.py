@@ -1,7 +1,7 @@
-#!/usr/bin/env python2
+
 
 # Author: echel0n <echel0n@sickrage.ca>
-# URL: https://git.sickrage.ca
+# URL: https://sickrage.ca
 #
 # This file is part of SickRage.
 #
@@ -71,13 +71,10 @@ class StaticImageHandler(StaticFileHandler):
 
 class srWebServer(object):
     def __init__(self):
-        self.name = "TORNADO"
         self.started = False
 
     def start(self):
         self.started = True
-
-        threading.currentThread().setName(self.name)
 
         # video root
         self.video_root = None
@@ -114,7 +111,7 @@ class srWebServer(object):
 
         # Load the app
         self.app = Application([],
-                               debug=sickrage.DEBUG,
+                               debug=False,
                                autoreload=False,
                                gzip=sickrage.srCore.srConfig.WEB_USE_GZIP,
                                xheaders=sickrage.srCore.srConfig.HANDLE_REVERSE_PROXY,
@@ -175,10 +172,12 @@ class srWebServer(object):
         ] + [(r'%s/videos/(.*)' % sickrage.srCore.srConfig.WEB_ROOT, StaticFileHandler,
               {"path": self.video_root})])
 
-        self.server = HTTPServer(self.app)
-        if sickrage.srCore.srConfig.ENABLE_HTTPS:
-            self.server.ssl_options = {"certfile": sickrage.srCore.srConfig.HTTPS_CERT,
-                                       "keyfile": sickrage.srCore.srConfig.HTTPS_KEY}
+        self.server = HTTPServer(self.app, no_keep_alive=True)
+
+        if sickrage.srCore.srConfig.ENABLE_HTTPS: self.server.ssl_options = {
+            "certfile": sickrage.srCore.srConfig.HTTPS_CERT,
+            "keyfile": sickrage.srCore.srConfig.HTTPS_KEY
+        }
 
         try:
             self.server.listen(sickrage.srCore.srConfig.WEB_PORT, None)
@@ -209,5 +208,6 @@ class srWebServer(object):
 
     def shutdown(self):
         if self.started:
+            self.server.close_all_connections()
             self.server.stop()
             self.started = False

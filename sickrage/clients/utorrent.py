@@ -1,7 +1,7 @@
 
 
 # Authors: Mr_Orange <mr_orange@hotmail.it>, EchelonFour
-# URL: http://github.com/SiCKRAGETV/SickRage/
+# URL: https://sickrage.ca
 #
 # This file is part of SickRage.
 #
@@ -50,7 +50,6 @@ class uTorrentAPI(GenericClient):
             self.response = sickrage.srCore.srWebSession.get(self.url + 'token.html',
                                                              timeout=120,
                                                              auth=(self.username, self.password),
-                                                             raise_exceptions=False,
                                                              verify=bool(sickrage.srCore.srConfig.TORRENT_VERIFY_CERT))
 
             self.auth = re.findall("<div.*?>(.*?)</", self.response.text)[0]
@@ -58,7 +57,7 @@ class uTorrentAPI(GenericClient):
         except Exception:
             return None
 
-        return self.auth if not self.response.status_code == 404 else None
+        return self.auth if self.response.ok else None
 
     def _add_torrent_uri(self, result):
 

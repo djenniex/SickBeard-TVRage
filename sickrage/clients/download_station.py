@@ -1,7 +1,7 @@
-#!/usr/bin/env python2
+
 
 # Author: echel0n <echel0n@sickrage.ca>
-# URL: https://git.sickrage.ca
+# URL: https://sickrage.ca
 #
 # This file is part of SickRage.
 #
@@ -36,7 +36,6 @@ class DownloadStationAPI(GenericClient):
 
         try:
             self.response = sickrage.srCore.srWebSession.get(auth_url,
-                                                             raise_exceptions=False,
                                                              verify=bool(sickrage.srCore.srConfig.TORRENT_VERIFY_CERT))
 
             self.auth = self.response.json()['data']['sid']
@@ -58,8 +57,8 @@ class DownloadStationAPI(GenericClient):
 
         if sickrage.srCore.srConfig.TORRENT_PATH:
             data['destination'] = sickrage.srCore.srConfig.TORRENT_PATH
-        self._request(method='post', data=data)
 
+        self._request(method='post', data=data)
         return self.response.json()['success']
 
     def _add_torrent_file(self, result):
@@ -74,6 +73,7 @@ class DownloadStationAPI(GenericClient):
 
         if sickrage.srCore.srConfig.TORRENT_PATH:
             data['destination'] = sickrage.srCore.srConfig.TORRENT_PATH
+
         files = {'file': (result.name + '.torrent', result.content)}
         self._request(method='post', data=data, files=files)
 

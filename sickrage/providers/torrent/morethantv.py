@@ -1,5 +1,5 @@
 # Author: Seamus Wassman
-# URL: http://github.com/SiCKRAGETV/SickRage/
+# URL: https://sickrage.ca
 #
 # This file is part of SickRage.
 #
@@ -22,9 +22,8 @@ import re
 import traceback
 
 import requests
-
 import sickrage
-from sickrage.core.caches import tv_cache
+from sickrage.core.caches.tv_cache import TVCache
 from sickrage.core.exceptions import AuthException
 from sickrage.core.helpers import bs4_parser, convert_size
 from sickrage.providers import TorrentProvider
@@ -32,9 +31,9 @@ from sickrage.providers import TorrentProvider
 
 class MoreThanTVProvider(TorrentProvider):
     def __init__(self):
-        super(MoreThanTVProvider, self).__init__("MoreThanTV",'www.morethan.tv')
+        super(MoreThanTVProvider, self).__init__("MoreThanTV",'www.morethan.tv', True)
 
-        self.supportsBacklog = True
+        self.supports_backlog = True
 
         self._uid = None
         self._hash = None
@@ -56,16 +55,16 @@ class MoreThanTVProvider(TorrentProvider):
 
         self.proper_strings = ['PROPER', 'REPACK']
 
-        self.cache = MoreThanTVCache(self)
+        self.cache = TVCache(self, min_time=10)
 
-    def _checkAuth(self):
+    def _check_auth(self):
 
         if not self.username or not self.password:
             raise AuthException("Your authentication credentials for " + self.name + " are missing, check your config.")
 
         return True
 
-    def _doLogin(self):
+    def login(self):
         if any(requests.utils.dict_from_cookiejar(sickrage.srCore.srWebSession.cookies).values()):
             return True
 
@@ -96,7 +95,7 @@ class MoreThanTVProvider(TorrentProvider):
 
         # freeleech = '3' if self.freeleech else '0'
 
-        if not self._doLogin():
+        if not self.login():
             return results
 
         for mode in search_params.keys():
@@ -183,17 +182,5 @@ class MoreThanTVProvider(TorrentProvider):
 
         return results
 
-    def seedRatio(self):
+    def seed_ratio(self):
         return self.ratio
-
-
-class MoreThanTVCache(tv_cache.TVCache):
-    def __init__(self, provider_obj):
-        tv_cache.TVCache.__init__(self, provider_obj)
-
-        # poll delay in minutes
-        self.minTime = 20
-
-    def _getRSSData(self):
-        search_params = {'RSS': ['']}
-        return {'entries': self.provider.search(search_params)}

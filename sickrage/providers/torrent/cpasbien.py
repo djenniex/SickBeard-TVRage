@@ -1,7 +1,7 @@
-#!/usr/bin/env python2
+
 
 # Author: echel0n <echel0n@sickrage.ca>
-# URL: https://git.sickrage.ca
+# URL: https://sickrage.ca
 #
 # This file is part of SickRage.
 #
@@ -23,16 +23,16 @@ from __future__ import unicode_literals
 import traceback
 
 import sickrage
-from sickrage.core.caches import tv_cache
+from sickrage.core.caches.tv_cache import TVCache
 from sickrage.core.helpers import bs4_parser
 from sickrage.providers import TorrentProvider
 
 
 class CpasbienProvider(TorrentProvider):
     def __init__(self):
-        super(CpasbienProvider, self).__init__("Cpasbien","www.cpasbien.io")
+        super(CpasbienProvider, self).__init__("Cpasbien","www.cpasbien.io", False)
 
-        self.supportsBacklog = True
+        self.supports_backlog = True
 
         self.ratio = None
         self.urls.update({
@@ -41,7 +41,7 @@ class CpasbienProvider(TorrentProvider):
 
         self.proper_strings = ['PROPER', 'REPACK']
 
-        self.cache = CpasbienCache(self)
+        self.cache = TVCache(self, min_time=30)
 
     def search(self, search_params, search_mode='eponly', epcount=0, age=0, epObj=None):
 
@@ -124,16 +124,5 @@ class CpasbienProvider(TorrentProvider):
 
         return results
 
-    def seedRatio(self):
+    def seed_ratio(self):
         return self.ratio
-
-
-class CpasbienCache(tv_cache.TVCache):
-    def __init__(self, provider_obj):
-        tv_cache.TVCache.__init__(self, provider_obj)
-
-        self.minTime = 30
-
-    def _getRSSData(self):
-        # search_strings = {'RSS': ['']}
-        return {'entries': {}}

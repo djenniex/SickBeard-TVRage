@@ -1,5 +1,5 @@
 # Author: Nick Sologoub
-# URL: http://github.com/SiCKRAGETV/SickRage/
+# URL: https://sickrage.ca
 #
 # This file is part of SickRage.
 #
@@ -23,16 +23,16 @@ import traceback
 import urllib
 
 import sickrage
-from sickrage.core.caches import tv_cache
+from sickrage.core.caches.tv_cache import TVCache
 from sickrage.core.helpers import bs4_parser, convert_size
 from sickrage.providers import TorrentProvider
 
 
 class PretomeProvider(TorrentProvider):
     def __init__(self):
-        super(PretomeProvider, self).__init__("Pretome",'pretome.info')
+        super(PretomeProvider, self).__init__("Pretome",'pretome.info', True)
 
-        self.supportsBacklog = True
+        self.supports_backlog = True
 
         self.username = None
         self.password = None
@@ -52,16 +52,16 @@ class PretomeProvider(TorrentProvider):
 
         self.proper_strings = ['PROPER', 'REPACK']
 
-        self.cache = PretomeCache(self)
+        self.cache = TVCache(self, min_time=30)
 
-    def _checkAuth(self):
+    def _check_auth(self):
 
         if not self.username or not self.password or not self.pin:
             sickrage.srCore.srLogger.warning("Invalid username or password or pin. Check your settings")
 
         return True
 
-    def _doLogin(self):
+    def login(self):
 
         login_params = {'username': self.username,
                         'password': self.password,
@@ -84,7 +84,7 @@ class PretomeProvider(TorrentProvider):
         results = []
         items = {'Season': [], 'Episode': [], 'RSS': []}
 
-        if not self._doLogin():
+        if not self.login():
             return results
 
         for mode in search_params.keys():
@@ -172,16 +172,5 @@ class PretomeProvider(TorrentProvider):
 
         return results
 
-    def seedRatio(self):
+    def seed_ratio(self):
         return self.ratio
-
-class PretomeCache(tv_cache.TVCache):
-    def __init__(self, provider_obj):
-        tv_cache.TVCache.__init__(self, provider_obj)
-
-        # only poll Pretome every 20 minutes max
-        self.minTime = 20
-
-    def _getRSSData(self):
-        search_params = {'RSS': ['']}
-        return {'entries': self.provider.search(search_params)}

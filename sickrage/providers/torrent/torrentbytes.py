@@ -1,7 +1,5 @@
-#!/usr/bin/env python2
-# -*- coding: utf-8 -*-
 # Author: echel0n <echel0n@sickrage.ca>
-# URL: https://git.sickrage.ca
+# URL: https://sickrage.ca
 #
 # This file is part of SickRage.
 #
@@ -25,7 +23,7 @@ import traceback
 import urllib
 
 import sickrage
-from sickrage.core.caches import tv_cache
+from sickrage.core.caches.tv_cache import TVCache
 from sickrage.core.helpers import bs4_parser, convert_size
 from sickrage.providers import TorrentProvider
 
@@ -33,9 +31,9 @@ from sickrage.providers import TorrentProvider
 class TorrentBytesProvider(TorrentProvider):
     def __init__(self):
 
-        super(TorrentBytesProvider, self).__init__("TorrentBytes", 'www.torrentbytes.net')
+        super(TorrentBytesProvider, self).__init__("TorrentBytes", 'www.torrentbytes.net', True)
 
-        self.supportsBacklog = True
+        self.supports_backlog = True
 
         self.username = None
         self.password = None
@@ -55,9 +53,9 @@ class TorrentBytesProvider(TorrentProvider):
 
         self.proper_strings = ['PROPER', 'REPACK']
 
-        self.cache = TorrentBytesCache(self)
+        self.cache = TVCache(self, min_time=20)
 
-    def _doLogin(self):
+    def login(self):
 
         login_params = {'username': self.username,
                         'password': self.password,
@@ -80,7 +78,7 @@ class TorrentBytesProvider(TorrentProvider):
         results = []
         items = {'Season': [], 'Episode': [], 'RSS': []}
 
-        if not self._doLogin():
+        if not self.login():
             return results
 
         for mode in search_params.keys():
@@ -174,17 +172,5 @@ class TorrentBytesProvider(TorrentProvider):
 
         return results
 
-    def seedRatio(self):
+    def seed_ratio(self):
         return self.ratio
-
-
-class TorrentBytesCache(tv_cache.TVCache):
-    def __init__(self, provider_obj):
-        tv_cache.TVCache.__init__(self, provider_obj)
-
-        # only poll TorrentBytes every 20 minutes max
-        self.minTime = 20
-
-    def _getRSSData(self):
-        search_params = {'RSS': ['']}
-        return {'entries': self.provider.search(search_params)}

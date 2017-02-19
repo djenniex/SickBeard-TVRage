@@ -1,5 +1,5 @@
 # Author: Idan Gutman
-# URL: http://github.com/SiCKRAGETV/SickRage/
+# URL: https://sickrage.ca
 #
 # This file is part of SickRage.
 #
@@ -18,12 +18,12 @@
 
 from __future__ import unicode_literals
 
-import re
 import traceback
-import urllib
+
+from requests.utils import dict_from_cookiejar
 
 import sickrage
-from sickrage.core.caches import tv_cache
+from sickrage.core.caches.tv_cache import TVCache
 from sickrage.core.helpers import bs4_parser
 from sickrage.providers import TorrentProvider
 
@@ -31,9 +31,9 @@ from sickrage.providers import TorrentProvider
 class SceneTimeProvider(TorrentProvider):
     def __init__(self):
 
-        super(SceneTimeProvider, self).__init__("SceneTime",'www.scenetime.com')
+        super(SceneTimeProvider, self).__init__("SceneTime",'www.scenetime.com', True)
 
-        self.supportsBacklog = True
+        self.supports_backlog = True
 
         self.username = None
         self.password = None
@@ -41,30 +41,36 @@ class SceneTimeProvider(TorrentProvider):
         self.minseed = None
         self.minleech = None
 
-        self.cache = SceneTimeCache(self)
+        self.enable_cookies = True
+
+        self.cache = TVCache(self, min_time=20)
 
         self.urls.update({
             'login': '{base_url}/takelogin.php'.format(base_url=self.urls['base_url']),
             'detail': '{base_url}/details.php?id=%s'.format(base_url=self.urls['base_url']),
-            'search': '{base_url}/browse.php?search=%s%s'.format(base_url=self.urls['base_url']),
+            'search': '{base_url}/browse_API.php'.format(base_url=self.urls['base_url']),
             'download': '{base_url}/download.php/%s/%s'.format(base_url=self.urls['base_url'])
         })
 
-        self.categories = "&c2=1&c43=13&c9=1&c63=1&c77=1&c79=1&c100=1&c101=1"
+        self.categories = [2, 42, 9, 63, 77, 79, 100, 83]
 
-    def _doLogin(self):
+    def login(self):
+        cookie_dict = dict_from_cookiejar(self.cookie_jar)
+        if cookie_dict.get('uid') and cookie_dict.get('pass'):
+            return True
 
-        login_params = {'username': self.username,
-                        'password': self.password}
+        if not self.add_cookies_from_ui():
+            return False
 
-        try:
-            response = sickrage.srCore.srWebSession.post(self.urls['login'], data=login_params, timeout=30).text
-        except Exception:
+        login_params = {'username': self.username, 'password': self.password}
+
+        response = sickrage.srCore.srWebSession.post(self.urls['login'], data=login_params, timeout=30)
+        if not response.ok:
             sickrage.srCore.srLogger.warning("[{}]: Unable to connect to provider".format(self.name))
             return False
 
-        if re.search('Username or password incorrect', response):
-            sickrage.srCore.srLogger.warning("[{}]: Invalid username or password. Check your settings".format(self.name))
+        if not dict_from_cookiejar(sickrage.srCore.srWebSession.cookies).get('uid') in response.text:
+            sickrage.srCore.srLogger.warning("Failed to login, check your cookies")
             return False
 
         return True
@@ -74,7 +80,7 @@ class SceneTimeProvider(TorrentProvider):
         results = []
         items = {'Season': [], 'Episode': [], 'RSS': []}
 
-        if not self._doLogin():
+        if not self.login():
             return results
 
         for mode in search_params.keys():
@@ -84,19 +90,18 @@ class SceneTimeProvider(TorrentProvider):
                 if mode != 'RSS':
                     sickrage.srCore.srLogger.debug("Search string: %s " % search_string)
 
-                searchURL = self.urls['search'] % (urllib.quote(search_string), self.categories)
-                sickrage.srCore.srLogger.debug("Search URL: %s" % searchURL)
+                query = {'sec': 'jax', 'cata': 'yes', 'search': search_string}
+                query.update({"c%s" % i: 1 for i in self.categories})
 
                 try:
-                    data = sickrage.srCore.srWebSession.get(searchURL).text
+                    data = sickrage.srCore.srWebSession.post(self.urls['search'], data=query).text
                 except Exception:
                     sickrage.srCore.srLogger.debug("No data returned from provider")
                     continue
 
                 try:
                     with bs4_parser(data) as html:
-                        torrent_table = html.select("#torrenttable table")
-                        torrent_rows = torrent_table[0].select("tr") if torrent_table else []
+                        torrent_rows = html.findAll('tr')
 
                         # Continue only if one Release is found
                         if len(torrent_rows) < 2:
@@ -157,17 +162,5 @@ class SceneTimeProvider(TorrentProvider):
 
         return results
 
-    def seedRatio(self):
+    def seed_ratio(self):
         return self.ratio
-
-
-class SceneTimeCache(tv_cache.TVCache):
-    def __init__(self, provider_obj):
-        tv_cache.TVCache.__init__(self, provider_obj)
-
-        # only poll SceneTime every 20 minutes max
-        self.minTime = 20
-
-    def _getRSSData(self):
-        search_params = {'RSS': ['']}
-        return {'entries': self.provider.search(search_params)}

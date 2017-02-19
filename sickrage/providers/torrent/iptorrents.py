@@ -20,8 +20,10 @@ from __future__ import unicode_literals
 
 import re
 
+from requests.utils import dict_from_cookiejar
+
 import sickrage
-from sickrage.core.caches import tv_cache
+from sickrage.core.caches.tv_cache import TVCache
 from sickrage.core.exceptions import AuthException
 from sickrage.core.helpers import bs4_parser, convert_size
 from sickrage.providers import TorrentProvider
@@ -29,9 +31,9 @@ from sickrage.providers import TorrentProvider
 
 class IPTorrentsProvider(TorrentProvider):
     def __init__(self):
-        super(IPTorrentsProvider, self).__init__("IPTorrents", 'iptorrents.eu')
+        super(IPTorrentsProvider, self).__init__("IPTorrents", 'iptorrents.eu', True)
 
-        self.supportsBacklog = True
+        self.supports_backlog = True
 
         self.username = None
         self.password = None
@@ -40,40 +42,52 @@ class IPTorrentsProvider(TorrentProvider):
         self.minseed = None
         self.minleech = None
 
-        self.cache = IPTorrentsCache(self)
+        self.enable_cookies = True
+
+        self.cache = TVCache(self, min_time=10)
 
         self.urls.update({
-            'login': '{base_url}/torrents/'.format(base_url=self.urls['base_url']),
+            'login': '{base_url}/take_login.php'.format(base_url=self.urls['base_url']),
             'search': '{base_url}/t?%s%s&q=%s&qf=#torrents'.format(base_url=self.urls['base_url'])
         })
 
         self.categories = '73=&60='
 
-    def _checkAuth(self):
+    def _check_auth(self):
 
         if not self.username or not self.password:
             raise AuthException("Your authentication credentials for " + self.name + " are missing, check your config.")
 
         return True
 
-    def _doLogin(self):
+    def login(self):
+        cookie_dict = dict_from_cookiejar(self.cookie_jar)
+        if cookie_dict.get('uid') and cookie_dict.get('pass'):
+            return True
 
-        login_params = {'username': self.username,
-                        'password': self.password,
-                        'login': 'submit'}
+        if not self.add_cookies_from_ui():
+            return False
 
-        try:
-            response = sickrage.srCore.srWebSession.post(self.urls['login'], data=login_params, timeout=30).text
-        except Exception:
+        login_params = {'username': self.username, 'password': self.password, 'login': 'submit'}
+
+        response = sickrage.srCore.srWebSession.post(self.urls['login'], data=login_params, timeout=30)
+        if not response.ok:
             sickrage.srCore.srLogger.warning("[{}]: Unable to connect to provider".format(self.name))
             return False
 
-        if re.search('tries left', response):
-            sickrage.srCore.srLogger.warning(
-                "You tried too often, please try again after 1 hour! Disable IPTorrents for at least 1 hour")
+        # Invalid username and password combination
+        if re.search('Invalid username and password combination', response.text):
+            sickrage.srCore.srLogger.warning(u"Invalid username or password. Check your settings")
             return False
-        if re.search('Password not correct', response):
-            sickrage.srCore.srLogger.warning("[{}]: Invalid username or password. Check your settings".format(self.name))
+
+        # You tried too often, please try again after 2 hours!
+        if re.search('You tried too often', response.text):
+            sickrage.srCore.srLogger.warning(u"You tried too often, please try again after 2 hours! Disable IPTorrents for at least 2 hours")
+            return False
+
+        # Captcha!
+        if re.search('Captcha verification failed.', response.text):
+            sickrage.srCore.srLogger.warning(u"Stupid captcha")
             return False
 
         return True
@@ -85,7 +99,7 @@ class IPTorrentsProvider(TorrentProvider):
 
         freeleech = '&free=on' if self.freeleech else ''
 
-        if not self._doLogin():
+        if not self.login():
             return results
 
         for mode in search_params.keys():
@@ -162,17 +176,5 @@ class IPTorrentsProvider(TorrentProvider):
 
         return results
 
-    def seedRatio(self):
+    def seed_ratio(self):
         return self.ratio
-
-
-class IPTorrentsCache(tv_cache.TVCache):
-    def __init__(self, provider_obj):
-        tv_cache.TVCache.__init__(self, provider_obj)
-
-        # Only poll IPTorrents every 10 minutes max
-        self.minTime = 10
-
-    def _getRSSData(self):
-        search_params = {'RSS': ['']}
-        return {'entries': self.provider.search(search_params)}

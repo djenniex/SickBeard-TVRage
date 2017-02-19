@@ -1,5 +1,5 @@
 # Author: Mr_Orange <mr_orange@hotmail.it>
-# URL: http://github.com/SiCKRAGETV/SickRage/
+# URL: https://sickrage.ca
 #
 # This file is part of SickRage.
 #
@@ -22,7 +22,7 @@ import re
 from urllib import urlencode
 
 import sickrage
-from sickrage.core.caches import tv_cache
+from sickrage.core.caches.tv_cache import TVCache
 from sickrage.core.helpers import convert_size
 from sickrage.providers import TorrentProvider
 
@@ -30,51 +30,51 @@ from sickrage.providers import TorrentProvider
 class ThePirateBayProvider(TorrentProvider):
     def __init__(self):
 
-        super(ThePirateBayProvider, self).__init__("ThePirateBay",'pirateproxy.la')
+        super(ThePirateBayProvider, self).__init__("ThePirateBay",'pirateproxy.la', False)
 
-        self.supportsBacklog = True
+        self.supports_backlog = True
 
         self.ratio = None
         self.confirmed = True
         self.minseed = None
         self.minleech = None
 
-        self.cache = ThePirateBayCache(self)
-
         self.urls.update({
             'search': '{base_url}/s/'.format(base_url=self.urls['base_url']),
             'rss': '{base_url}/tv/latest'.format(base_url=self.urls['base_url'])
         })
 
-        """
-        205 = SD, 208 = HD, 200 = All Videos
-        https://thepiratebay.gd/s/?q=Game of Thrones&type=search&orderby=7&page=0&category=200
-        """
-        self.search_params = {
-            'q': '',
-            'type': 'search',
-            'orderby': 7,
-            'page': 0,
-            'category': 200
-        }
-
         self.re_title_url = r'/torrent/(?P<id>\d+)/(?P<title>.*?)".+?(?P<url>magnet.*?)".+?Size (?P<size>[\d\.]*&nbsp;[TGKMiB]{2,3}).+?(?P<seeders>\d+)</td>.+?(?P<leechers>\d+)</td>'
 
-    def search(self, search_strings, search_mode='eponly', epcount=0, age=0, epObj=None):
+        self.cache = TVCache(self, min_time=30)
 
+    def search(self, search_strings, search_mode='eponly', epcount=0, age=0, epObj=None):
         results = []
+
+        """
+        205 = SD, 208 = HD, 200 = All Videos
+        https://pirateproxy.pl/s/?q=Game of Thrones&type=search&orderby=7&page=0&category=200
+        """
+        search_params = {
+            "q": "",
+            "type": "search",
+            "orderby": 7,
+            "page": 0,
+            "category": 200
+        }
+
         items = {'Season': [], 'Episode': [], 'RSS': []}
 
         for mode in search_strings.keys():
             sickrage.srCore.srLogger.debug("Search Mode: %s" % mode)
             for search_string in search_strings[mode]:
 
-                self.search_params.update({'q': search_string.strip()})
+                search_params.update({'q': search_string.strip()})
 
                 if mode != 'RSS':
                     sickrage.srCore.srLogger.debug("Search string: " + search_string)
 
-                searchURL = self.urls[('search', 'rss')[mode == 'RSS']] + '?' + urlencode(self.search_params)
+                searchURL = self.urls[('search', 'rss')[mode == 'RSS']] + '?' + urlencode(search_params)
                 sickrage.srCore.srLogger.debug("Search URL: %s" % searchURL)
 
                 try:
@@ -122,17 +122,5 @@ class ThePirateBayProvider(TorrentProvider):
 
         return results
 
-    def seedRatio(self):
+    def seed_ratio(self):
         return self.ratio
-
-
-class ThePirateBayCache(tv_cache.TVCache):
-    def __init__(self, provider_obj):
-        tv_cache.TVCache.__init__(self, provider_obj)
-
-        # only poll ThePirateBay every 30 minutes max
-        self.minTime = 30
-
-    def _getRSSData(self):
-        search_params = {'RSS': ['']}
-        return {'entries': self.provider.search(search_params)}

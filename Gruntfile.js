@@ -5,11 +5,6 @@ module.exports = function (grunt) {
         clean: {
             dist: 'dist',
             bower_components: 'bower_components',
-            fonts: 'sickrage/core/webserver/gui/default/fonts/',
-            images: [
-                'sickrage/core/webserver/gui/default/images/ui/',
-                'sickrage/core/webserver/gui/default/images/tablesorter/'
-            ],
             sass: [
                 '.sass-cache',
                 'sickrage/core/webserver/gui/default/scss/'
@@ -27,8 +22,10 @@ module.exports = function (grunt) {
         },
         bower_concat: {
             all: {
-                dest: 'dist/bower.js',
-                cssDest: 'dist/bower.css',
+                dest: {
+                    js:'dist/bower.js',
+                    css:'dist/bower.css'
+                },
                 callback: function (mainFiles) {
                     return mainFiles.map(function (filepath) {
                         var min = filepath.replace(/\.js$/, '.min.js');
@@ -40,17 +37,18 @@ module.exports = function (grunt) {
                         'dist/css/bootstrap.min.css',
                         'dist/js/bootstrap.min.js'
                     ],
-                    'jquery-ui': [
-                        'jquery-ui.min.js',
-                        'themes/base/jquery-ui.min.css'
-                    ],
                     'bootstrap-formhelpers': [
                         'dist/js/bootstrap-formhelpers.min.js',
                         'dist/css/bootstrap-formhelpers.min.css'
                     ],
+                    'jquery-ui': [
+                        'jquery-ui.min.js',
+                        'themes/base/jquery-ui.min.css'
+                    ],
                     'jquery.tablesorter': [
                         'dist/js/jquery.tablesorter.combined.min.js',
                         'dist/js/widgets/widget-columnSelector.min.js',
+                        'dist/js/widgets/widget-stickyHeaders.min.js',
                         'dist/css/theme.blue.min.css'
                     ],
                     'isotope': [
@@ -87,7 +85,7 @@ module.exports = function (grunt) {
             build: {
                 options: {
                     fontPath: 'sickrage/core/webserver/gui/default/fonts/',
-                    cssFile: 'dist/fonts.css',
+                    css: 'dist/fonts.css',
                     formats: {
                         eot: true,
                         ttf: true,
@@ -128,16 +126,13 @@ module.exports = function (grunt) {
             }
         },
         imagemin: {
-            options: {
-                optimizationLevel: 3
-            },
-            jqueryui: {
+            jquery_ui: {
                 files: [{
                     expand: true,
                     flatten: true,
                     cwd: 'bower_components/jquery-ui/themes/',
                     src: ['**/*.{png,jpg,gif}'],
-                    dest: 'sickrage/core/webserver/gui/default/images/ui/'
+                    dest: 'sickrage/core/webserver/gui/default/images/'
                 }]
             },
             tablesorter: {
@@ -148,12 +143,18 @@ module.exports = function (grunt) {
                     src: ['**/*.{png,jpg,gif}'],
                     dest: 'sickrage/core/webserver/gui/default/images/tablesorter/'
                 }]
+            },
+            boostrap_formhelpers: {
+                files: [{
+                    expand: true,
+                    flatten: true,
+                    cwd: 'bower_components/bootstrap-formhelpers/img/',
+                    src: ['**/*.{png,jpg,gif}'],
+                    dest: 'sickrage/core/webserver/gui/default/images/bootstrap-formhelpers/'
+                }]
             }
         },
         uglify: {
-            options: {
-                mangle: false
-            },
             bower: {
                 files: {
                     'sickrage/core/webserver/gui/default/js/bower.min.js': ['dist/bower.js']
@@ -203,21 +204,24 @@ module.exports = function (grunt) {
             ]
         },
         changelog: {
-            sample: {
+            release: {
                 options: {
-                    fileHeader: '# Changelog',
-                    dest: 'changelog.md',
+                    after: '256',
                     logArguments: [
                         '--pretty=* %h - %ad: %s',
                         '--no-merges',
                         '--date=short'
                     ],
-                    template: '{{> features}}',
+                    fileHeader: '# Changelog',
                     featureRegex: /^(.*)$/gim,
                     partials: {
-                        features: '{{#if features}}{{#each features}}{{> feature}}{{/each}}{{else}}{{> empty}}{{/if}}\n',
-                        feature: '- {{this}} {{this.date}}\n'
-                    }
+                        features: '{{#each features}}{{> feature}}{{/each}}\n',
+                        feature: '- {{this}} {{this.date}}\n',
+                        fixes: '{{#each fixes}}{{> fix}}{{/each}}\n',
+                        fix: '- {{this}} {{this.date}}\n'
+
+                    },
+                    dest: "changelog.md"
                 }
             }
         }

@@ -1,6 +1,6 @@
 # Author: echel0n <echel0n@sickrage.ca>
-# URL: https://sickrage.tv/
-# Git: https://github.com/SiCKRAGETV/SickRage.git
+# URL: https://sickrage.ca/
+# Git: https://git.sickrage.ca/SiCKRAGE/sickrage.git
 #
 # This file is part of SickRage.
 #
@@ -23,10 +23,9 @@ import datetime
 import re
 import sys
 
+import sickrage
 from apscheduler.triggers.interval import IntervalTrigger
 from dateutil import parser
-
-import sickrage
 from sickrage.core.common import Quality, dateFormat, dateTimeFormat
 
 
@@ -76,6 +75,9 @@ class SearchResult(object):
 
         # result type
         self.resultType = ''
+
+        # dict of files and their sizes
+        self.files = {}
 
     def __str__(self):
 

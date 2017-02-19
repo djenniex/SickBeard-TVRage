@@ -27,15 +27,15 @@ from sickrage.providers import TorrentProvider
 
 class HDBitsProvider(TorrentProvider):
     def __init__(self):
-        super(HDBitsProvider, self).__init__("HDBits", 'hdbits.org')
+        super(HDBitsProvider, self).__init__("HDBits", 'hdbits.org', True)
 
-        self.supportsBacklog = True
+        self.supports_backlog = True
 
         self.username = None
         self.passkey = None
         self.ratio = None
 
-        self.cache = HDBitsCache(self)
+        self.cache = HDBitsCache(self, min_time=15)
 
         self.urls.update({
             'search': '{base_url}/api/torrents'.format(base_url=self.urls['base_url']),
@@ -43,7 +43,7 @@ class HDBitsProvider(TorrentProvider):
             'download': '{base_url}/download.php?'.format(base_url=self.urls['base_url'])
         })
 
-    def _checkAuth(self):
+    def _check_auth(self):
 
         if not self.username or not self.passkey:
             raise AuthException("Your authentication credentials for " + self.name + " are missing, check your config.")
@@ -54,7 +54,8 @@ class HDBitsProvider(TorrentProvider):
 
         if 'status' in parsedJSON and 'message' in parsedJSON:
             if parsedJSON.get('status') == 5:
-                sickrage.srCore.srLogger.warning("[{}]: Invalid username or password. Check your settings".format(self.name))
+                sickrage.srCore.srLogger.warning(
+                    "[{}]: Invalid username or password. Check your settings".format(self.name))
 
         return True
 
@@ -83,7 +84,7 @@ class HDBitsProvider(TorrentProvider):
 
         sickrage.srCore.srLogger.debug("Search string: %s" % search_params)
 
-        self._checkAuth()
+        self._check_auth()
 
         try:
             parsedJSON = sickrage.srCore.srWebSession.post(self.urls['search'], data=search_params).json()
@@ -102,7 +103,7 @@ class HDBitsProvider(TorrentProvider):
         # FIXME SORTING
         return results
 
-    def findPropers(self, search_date=None):
+    def find_propers(self, search_date=None):
         results = []
 
         search_terms = [' proper ', ' repack ']
@@ -176,23 +177,17 @@ class HDBitsProvider(TorrentProvider):
 
         return post_data
 
-    def seedRatio(self):
+    def seed_ratio(self):
         return self.ratio
 
 
 class HDBitsCache(tv_cache.TVCache):
-    def __init__(self, provider_obj):
-        tv_cache.TVCache.__init__(self, provider_obj)
-
-        # only poll HDBits every 15 minutes max
-        self.minTime = 15
-
-    def _getRSSData(self):
+    def _get_rss_data(self):
         results = []
 
         try:
-            resp = self.provider.session.post(self.provider.urls['rss'],
-                                              data=self.provider._make_post_data_JSON()).json()
+            resp = sickrage.srCore.srWebSession.post(self.provider.urls['rss'],
+                                                     data=self.provider._make_post_data_JSON()).json()
 
             if self.provider._checkAuthFromData(resp):
                 results = resp['data']

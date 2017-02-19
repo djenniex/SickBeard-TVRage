@@ -1,7 +1,5 @@
-#!/usr/bin/env python2
-
 # Author: echel0n <echel0n@sickrage.ca>
-# URL: https://git.sickrage.ca
+# URL: https://sickrage.ca
 #
 # This file is part of SickRage.
 #
@@ -36,13 +34,12 @@ class mlnetAPI(GenericClient):
         try:
             self.response = sickrage.srCore.srWebSession.get(self.host,
                                                              auth=(self.username, self.password),
-                                                             raise_exceptions=False,
                                                              verify=bool(sickrage.srCore.srConfig.TORRENT_VERIFY_CERT))
             self.auth = self.response.text
         except Exception:
             return None
 
-        return self.auth if not self.response.status_code == 404 else None
+        return self.auth if self.response.ok else None
 
     def _add_torrent_uri(self, result):
 

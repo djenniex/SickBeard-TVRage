@@ -1,6 +1,6 @@
 # Author: echel0n <echel0n@sickrage.ca>
-# URL: https://sickrage.tv
-# Git: https://github.com/SiCKRAGETV/SickRage.git
+# URL: https://sickrage.ca
+# Git: https://git.sickrage.ca/SiCKRAGE/sickrage.git
 #
 # This file is part of SickRage.
 #
@@ -19,52 +19,76 @@
 
 from __future__ import unicode_literals
 
-import threading
-from Queue import PriorityQueue
-from datetime import datetime
-
 try:
-    from futures import ThreadPoolExecutor, thread
+    from Queue import PriorityQueue, Empty
 except ImportError:
-    from concurrent.futures import ThreadPoolExecutor, thread
+    from queue import PriorityQueue, Empty
+
+import threading
+from datetime import datetime
 
 import sickrage
 
 
-class QueuePriorities(object):
+class srQueuePriorities(object):
     LOW = 10
     NORMAL = 20
     HIGH = 30
 
 
-class srQueue(PriorityQueue):
-    def __init__(self, maxsize=0):
-        PriorityQueue.__init__(self, maxsize)
-        self.queue_name = "QUEUE"
-        self.lock = threading.Lock()
+class srQueue(threading.Thread):
+    def __init__(self, name="QUEUE"):
+        super(srQueue, self).__init__(name=name)
+        self.daemon = True
+        self._queue = PriorityQueue()
         self.currentItem = None
         self.min_priority = 0
         self.amActive = False
+        self.lock = threading.Lock()
         self.stop = threading.Event()
+        self.threads = []
+
+    def run(self):
+        """
+        Process items in this queue
+        """
+
+        while not self.stop.is_set():
+            with self.lock:
+                self.amActive = True
+
+                if self.currentItem is None or not self.currentItem.isAlive():
+                    if self.currentItem:
+                        self.currentItem = None
+
+                    self.currentItem = self.get()
+                    if self.currentItem.priority < self.min_priority:
+                        self.put(self.currentItem)
+                        self.currentItem = None
+                    else:
+                        self.currentItem.start()
+                        self.threads += [self.currentItem]
+
+                self.amActive = False
 
     @property
-    def name(self):
-        return self.queue_name
+    def queue(self):
+        return self._queue.queue
 
+    def get(self, *args, **kwargs):
+        _, item = self._queue.get(*args, **kwargs)
+        return item
 
-    def get(self, block=True, timeout=None):
-        return PriorityQueue.get(self, block, timeout)
-
-    def put(self, item, block=True, timeout=None):
+    def put(self, item, *args, **kwargs):
         """
         Adds an item to this queue
 
         :param item: Queue object to add
         :return: item
         """
-        item.name = "{}-{}".format(self.name, item.name)
         item.added = datetime.now()
-        PriorityQueue.put(self, (item.priority, item), block, timeout)
+        item.name = "{}-{}".format(self.name, item.name)
+        self._queue.put((item.priority, item), *args, **kwargs)
         return item
 
     def pause(self):
@@ -77,59 +101,21 @@ class srQueue(PriorityQueue):
         sickrage.srCore.srLogger.info("Unpausing queue")
         self.min_priority = 0
 
-    def run(self, force=False):
-        """
-        Process items in this queue
-
-        :param force: Force queue processing (currently not implemented)
-        """
-
-        if self.amActive:
-            return
-
-        with self.lock:
-            self.amActive = True
-
-            # if there's something in the queue then run it in a thread and take it out of the queue
-            while not self.empty():
-                if self.queue[0][0] < self.min_priority:
-                    return
-
-                # execute item in queue
-                with ThreadPoolExecutor(1) as executor:
-                    if self.stop.isSet():
-                        executor._threads.clear()
-                        thread._threads_queues.clear()
-                        executor.shutdown()
-                        return
-
-                    executor.submit(self.callback)
-
-            self.amActive = False
-
-    def callback(self):
-        item = self.get()[1]
-        threading.currentThread().setName(self.name)
-        item.run()
-        item.finish()
-
     def shutdown(self):
         self.stop.set()
+        try:
+            [t.join(1) for t in self.threads if t.isAlive()]
+            self.join(1)
+        except:
+            pass
 
 
-class QueueItem(object):
+class srQueueItem(threading.Thread):
     def __init__(self, name, action_id=0):
+        super(srQueueItem, self).__init__(name=name.replace(" ", "-").upper())
+        self.daemon = True
         self.lock = threading.Lock()
-        self.name = name.replace(" ", "-").upper()
-        self.inProgress = False
-        self.priority = QueuePriorities.NORMAL
-        self.action_id = action_id
         self.stop = threading.Event()
+        self.priority = srQueuePriorities.NORMAL
+        self.action_id = action_id
         self.added = None
-
-    def run(self):
-        threading.currentThread().setName(self.name)
-        self.inProgress = True
-
-    def finish(self):
-        self.inProgress = False

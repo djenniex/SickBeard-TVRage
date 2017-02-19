@@ -1,38 +1,30 @@
-#!/usr/bin/env python2
-
+#!/usr/bin/env python2.7
 # Author: echel0n <echel0n@sickrage.ca>
-# URL: https://git.sickrage.ca
+# URL: https://sickrage.ca
 #
-# This file is part of SickRage.
+# This file is part of SiCKRAGE.
 #
-# SickRage is free software: you can redistribute it and/or modify
+# SiCKRAGE is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# SickRage is distributed in the hope that it will be useful,
+# SiCKRAGE is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 # GNU General Public License for more details.
 #
 # You should have received a copy of the GNU General Public License
-# along with SickRage.  If not, see <http://www.gnu.org/licenses/>.
+# along with SiCKRAGE. If not, see <http://www.gnu.org/licenses/>.
 
 from __future__ import unicode_literals
 
 import io
 import os.path
 import sys
-
-try:
-    import ConfigParser as configparser
-    import urllib2
-    from urllib import urlencode
-except ImportError:
-    import configparser
-    import urllib.request as urllib2
-    from urllib.parse import urlencode
-    HTTPBasicAuthHandler = urllib2.HTTPBasicAuthHandler
+from ConfigParser import RawConfigParser, NoOptionError
+from urllib import urlencode
+from urllib2 import HTTPPasswordMgrWithDefaultRealm, HTTPBasicAuthHandler, build_opener, install_opener
 
 
 def processEpisode(dir_to_process, org_NZB_name=None, status=None):
@@ -51,7 +43,7 @@ def processEpisode(dir_to_process, org_NZB_name=None, status=None):
         default_url = "http://" + default_url
 
     # Get values from config_file
-    config = configparser.RawConfigParser()
+    config = RawConfigParser()
     config_filename = os.path.join(os.path.dirname(sys.argv[0]), "autoProcessTV.cfg")
 
     if not os.path.isfile(config_filename):
@@ -75,7 +67,7 @@ def processEpisode(dir_to_process, org_NZB_name=None, status=None):
             try:
                 ssl = int(config.get("sickrage", "ssl"))
 
-            except (configparser.NoOptionError, ValueError):
+            except (NoOptionError, ValueError):
                 pass
 
             try:
@@ -84,9 +76,9 @@ def processEpisode(dir_to_process, org_NZB_name=None, status=None):
                     web_root = "/" + web_root
 
                 if not web_root.endswith("/"):
-                    web_root = web_root + "/"
+                    web_root += "/"
 
-            except configparser.NoOptionError:
+            except NoOptionError:
                 pass
 
         except EnvironmentError:
@@ -95,15 +87,12 @@ def processEpisode(dir_to_process, org_NZB_name=None, status=None):
             # There was a config_file, don't use default values but exit
             sys.exit(1)
 
-    params = {}
+    params = {'quiet': 1, 'dir': dir_to_process}
 
-    params['quiet'] = 1
-
-    params['dir'] = dir_to_process
-    if org_NZB_name != None:
+    if org_NZB_name is not None:
         params['nzbName'] = org_NZB_name
 
-    if status != None:
+    if status is not None:
         params['failed'] = status
 
     if ssl:
@@ -116,11 +105,11 @@ def processEpisode(dir_to_process, org_NZB_name=None, status=None):
     print ("Opening URL: " + url)
 
     try:
-        password_mgr = urllib2.HTTPPasswordMgrWithDefaultRealm()
+        password_mgr = HTTPPasswordMgrWithDefaultRealm()
         password_mgr.add_password(None, url, username, password)
         handler = HTTPBasicAuthHandler(password_mgr)
-        opener = urllib2.build_opener(handler)
-        urllib2.install_opener(opener)
+        opener = build_opener(handler)
+        install_opener(opener)
 
         result = opener.open(url).readlines()
 

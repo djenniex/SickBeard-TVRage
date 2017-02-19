@@ -1,7 +1,7 @@
-#!/usr/bin/env python2
+
 
 # Author: echel0n <echel0n@sickrage.ca>
-# URL: http://github.com/SiCKRAGETV/SickRage/
+# URL: https://sickrage.ca
 #
 # This file is part of SickRage.
 #
@@ -20,18 +20,18 @@
 
 from __future__ import unicode_literals
 
+import datetime
 import os
 import traceback
 
 import sickrage
 from sickrage.core.blackandwhitelist import BlackAndWhiteList
 from sickrage.core.common import WANTED
-from sickrage.core.databases import main_db
 from sickrage.core.exceptions import CantRefreshShowException, \
     CantRemoveShowException, CantUpdateShowException, EpisodeDeletedException, \
-    MultipleShowObjectsException, ShowDirectoryNotFoundException
+    MultipleShowObjectsException
 from sickrage.core.helpers import scrub
-from sickrage.core.queues import srQueue, QueueItem, QueuePriorities
+from sickrage.core.queues import srQueue, srQueueItem, srQueuePriorities
 from sickrage.core.scene_numbering import xem_refresh, get_xem_numbering_for_show
 from sickrage.core.trakt import TraktAPI
 from sickrage.core.tv.show import TVShow
@@ -42,11 +42,7 @@ from sickrage.indexers.exceptions import indexer_attributenotfound, \
 
 class srShowQueue(srQueue):
     def __init__(self):
-        srQueue.__init__(self)
-        self.queue_name = "SHOWQUEUE"
-
-    def run(self, force=False):
-        srQueue.run(self, force)
+        srQueue.__init__(self, "SHOWQUEUE")
 
     @property
     def loadingShowList(self):
@@ -56,11 +52,10 @@ class srShowQueue(srQueue):
         if not show:
             return False
 
-        return show.indexerid in [x.show.indexerid if x.show else 0 for p,x in self.queue if x.action_id in actions]
+        return show.indexerid in [x.show.indexerid if x.show else 0 for p, x in self.queue if x.action_id in actions]
 
     def _isBeingSomethinged(self, show, actions):
-        return not (not (self.currentItem is not None) or not (
-            show == self.currentItem.show)) and self.currentItem.action_id in actions
+        return self.currentItem is not None and show == self.currentItem.show and self.currentItem.action_id in actions
 
     def isInUpdateQueue(self, show):
         return self._isInQueue(show, (ShowQueueActions.UPDATE, ShowQueueActions.FORCEUPDATE))
@@ -90,7 +85,7 @@ class srShowQueue(srQueue):
         return self._isBeingSomethinged(show, (ShowQueueActions.SUBTITLE,))
 
     def _getLoadingShowList(self):
-        return [x for p, x in self.queue + [(0, self.currentItem)] if not (not x or not x.isLoading)]
+        return [x for p, x in self.queue + [(0, self.currentItem)] if x is not None and x.isLoading]
 
     def updateShow(self, show, force=False):
 
@@ -106,29 +101,24 @@ class srShowQueue(srQueue):
             raise CantUpdateShowException(
                 str(show.name) + " is in the process of being updated, can't update again until it's done.")
 
-        if force:
-            return self.put(QueueItemForceUpdate(show))
-
-        return self.put(QueueItemUpdate(show))
+        return self.put(QueueItemForceUpdate(show)) if force else self.put(QueueItemUpdate(show))
 
     def refreshShow(self, show, force=False):
-
-        if self.isBeingRefreshed(show) and not force:
-            raise CantRefreshShowException("This show is already being refreshed, not refreshing again.")
-
-        if (self.isBeingUpdated(show) or self.isInUpdateQueue(show)) and not force:
-            sickrage.srCore.srLogger.debug(
+        if (self.isBeingRefreshed(show) or self.isInRefreshQueue(show)) and not force:
+            raise CantRefreshShowException(
+                "This show is already being refreshed or queued to be refreshed, skipping this request.")
+        elif (self.isBeingUpdated(show) or self.isInUpdateQueue(show)) and not force:
+            raise CantRefreshShowException(
                 "A refresh was attempted but there is already an update queued or in progress. Since updates do a refresh at the end anyway I'm skipping this request.")
-            return
 
-        sickrage.srCore.srLogger.debug("Queueing show refresh for " + show.name)
+        sickrage.srCore.srLogger.debug("Queueing show refresh for {}".format(show.name))
 
         return self.put(QueueItemRefresh(show, force=force))
 
-    def renameShowEpisodes(self, show, force=False):
+    def renameShowEpisodes(self, show):
         return self.put(QueueItemRename(show))
 
-    def downloadSubtitles(self, show, force=False):
+    def downloadSubtitles(self, show):
         return self.put(QueueItemSubtitle(show))
 
     def addShow(self, indexer, indexer_id, showDir, default_status=None, quality=None, flatten_folders=None,
@@ -190,7 +180,7 @@ class ShowQueueActions(object):
     }
 
 
-class ShowQueueItem(QueueItem):
+class ShowQueueItem(srQueueItem):
     """
     Represents an item in the queue waiting to be executed
 
@@ -202,17 +192,15 @@ class ShowQueueItem(QueueItem):
     - show being subtitled
     """
 
-    def __init__(self, action_id, show):
+    def __init__(self, show, action_id):
         super(ShowQueueItem, self).__init__(ShowQueueActions.names[action_id], action_id)
         self.show = show
 
     def finish(self):
         self.show.flushEpisodes()
-        super(ShowQueueItem, self).finish()
 
     def isInQueue(self):
-        return self in sickrage.srCore.SHOWQUEUE.queue + [
-            sickrage.srCore.SHOWQUEUE.currentItem]  # @UndefinedVariable
+        return self in sickrage.srCore.SHOWQUEUE.queue + [sickrage.srCore.SHOWQUEUE.currentItem]
 
     @property
     def show_name(self):
@@ -226,7 +214,7 @@ class ShowQueueItem(QueueItem):
 class QueueItemAdd(ShowQueueItem):
     def __init__(self, indexer, indexer_id, showDir, default_status, quality, flatten_folders, lang, subtitles, anime,
                  scene, paused, blacklist, whitelist, default_status_after, archive):
-        super(QueueItemAdd, self).__init__(ShowQueueActions.ADD, None)
+        super(QueueItemAdd, self).__init__(None, ShowQueueActions.ADD)
         self.indexer = indexer
         self.indexer_id = indexer_id
         self.showDir = showDir
@@ -242,7 +230,7 @@ class QueueItemAdd(ShowQueueItem):
         self.whitelist = whitelist
         self.default_status_after = default_status_after
         self.archive = archive
-        self.priority = QueuePriorities.HIGH
+        self.priority = srQueuePriorities.HIGH
 
     @property
     def show_name(self):
@@ -264,9 +252,7 @@ class QueueItemAdd(ShowQueueItem):
             return True
 
     def run(self):
-        super(QueueItemAdd, self).run()
-
-        sickrage.srCore.srLogger.info("Started adding show {}".format(self.showDir))
+        sickrage.srCore.srLogger.info("Started adding show {}".format(self.show_name))
 
         index_name = srIndexerApi(self.indexer).name
 
@@ -281,6 +267,7 @@ class QueueItemAdd(ShowQueueItem):
 
             t = srIndexerApi(self.indexer).indexer(**lINDEXER_API_PARMS)
             s = t[self.indexer_id]
+            if not s: return self._finishEarly()
 
             # this usually only happens if they have an NFO in their show dir which gave us a Indexer ID that has no proper english version of the show
             if not getattr(s, 'seriesname'):
@@ -336,6 +323,7 @@ class QueueItemAdd(ShowQueueItem):
 
         try:
             self.show = TVShow(self.indexer, self.indexer_id, self.lang)
+
             self.show.loadFromIndexer()
 
             # set up initial values
@@ -392,16 +380,11 @@ class QueueItemAdd(ShowQueueItem):
             sickrage.srCore.srLogger.debug(traceback.format_exc())
             raise self._finishEarly()
 
-        sickrage.srCore.srLogger.debug("Retrieving show info from TMDb")
         try:
-            self.show.loadTMDbInfo()
+            sickrage.srCore.srLogger.debug("Attempting to retrieve show info from IMDb")
+            self.show.loadIMDbInfo()
         except Exception as e:
-            sickrage.srCore.srLogger.error("Error loading TMDb info: {}".format(e.message))
-            try:
-                sickrage.srCore.srLogger.debug("Attempting to retrieve show info from IMDb")
-                self.show.loadIMDbInfo()
-            except Exception as e:
-                sickrage.srCore.srLogger.error("Error loading IMDb info: {}".format(e.message))
+            sickrage.srCore.srLogger.error("Error loading IMDb info: {}".format(e.message))
 
         # Load XEM data to DB for show
         xem_refresh(self.show.indexerid, self.show.indexer, force=True)
@@ -462,31 +445,31 @@ class QueueItemAdd(ShowQueueItem):
 
         self.show.saveToDB()
 
-        sickrage.srCore.NAMECACHE.buildNameCache(self.show)
+        sickrage.srCore.NAMECACHE.build(self.show)
+
+        self.finish()
 
         sickrage.srCore.srLogger.info("Finished adding show {}".format(self.showDir))
 
     def _finishEarly(self):
-        if self.show:
-            sickrage.srCore.SHOWQUEUE.removeShow(self.show)
+        if self.show: sickrage.srCore.SHOWQUEUE.removeShow(self.show)
 
 
 class QueueItemRefresh(ShowQueueItem):
     def __init__(self, show=None, force=False):
-        super(QueueItemRefresh, self).__init__(ShowQueueActions.REFRESH, show)
+        super(QueueItemRefresh, self).__init__(show, ShowQueueActions.REFRESH)
 
         # do refreshes first because they're quick
-        self.priority = QueuePriorities.NORMAL
+        self.priority = srQueuePriorities.NORMAL
 
         # force refresh certain items
         self.force = force
 
     def run(self):
-        super(QueueItemRefresh, self).run()
-
         sickrage.srCore.srLogger.info("Performing refresh for show: {}".format(self.show.name))
 
         self.show.refreshDir()
+
         self.show.writeMetadata()
 
         if self.force:
@@ -497,21 +480,21 @@ class QueueItemRefresh(ShowQueueItem):
         # Load XEM data to DB for show
         xem_refresh(self.show.indexerid, self.show.indexer)
 
+        self.show.last_refresh = datetime.date.today().toordinal()
+
+        self.finish()
+
         sickrage.srCore.srLogger.info("Finished refresh for show: {}".format(self.show.name))
 
 
 class QueueItemRename(ShowQueueItem):
     def __init__(self, show=None):
-        super(QueueItemRename, self).__init__(ShowQueueActions.RENAME, show)
+        super(QueueItemRename, self).__init__(show, ShowQueueActions.RENAME)
 
     def run(self):
-        super(QueueItemRename, self).run()
-
         sickrage.srCore.srLogger.info("Performing renames for show: {}".format(self.show.name))
 
-        try:
-            self.show.location
-        except ShowDirectoryNotFoundException:
+        if not os.path.isdir(self.show.location):
             sickrage.srCore.srLogger.warning(
                 "Can't perform rename on " + self.show.name + " when the show dir is missing.")
             return
@@ -538,29 +521,31 @@ class QueueItemRename(ShowQueueItem):
         for cur_ep_obj in ep_obj_rename_list:
             cur_ep_obj.rename()
 
+        self.finish()
+
         sickrage.srCore.srLogger.info("Finished renames for show: {}".format(self.show.name))
 
 
 class QueueItemSubtitle(ShowQueueItem):
     def __init__(self, show=None):
-        super(QueueItemSubtitle, self).__init__(ShowQueueActions.SUBTITLE, show)
+        super(QueueItemSubtitle, self).__init__(show, ShowQueueActions.SUBTITLE)
 
     def run(self):
-        super(QueueItemSubtitle, self).run()
-
         sickrage.srCore.srLogger.info("Started downloading subtitles for show: {}".format(self.show.name))
+
         self.show.downloadSubtitles()
+
+        self.finish()
+
         sickrage.srCore.srLogger.info("Finished downloading subtitles for show: {}".format(self.show.name))
 
 
 class QueueItemUpdate(ShowQueueItem):
-    def __init__(self, action_id=ShowQueueActions.UPDATE, show=None):
-        super(QueueItemUpdate, self).__init__(action_id, show)
+    def __init__(self, show=None, action_id=ShowQueueActions.UPDATE):
+        super(QueueItemUpdate, self).__init__(show, action_id)
         self.force = False
 
     def run(self):
-        super(QueueItemUpdate, self).run()
-
         sickrage.srCore.srLogger.info("Performing updates for show: {}".format(self.show.name))
 
         try:
@@ -568,7 +553,7 @@ class QueueItemUpdate(ShowQueueItem):
             self.show.loadFromIndexer(cache=not self.force)
         except indexer_error as e:
             sickrage.srCore.srLogger.warning(
-                "Unable to contact " + srIndexerApi(self.show.indexer).name + ", aborting: {}".format(e))
+                "Unable to contact " + srIndexerApi(self.show.indexer).name + ", aborting: {}".format(e.message))
             return
         except indexer_attributenotfound as e:
             sickrage.srCore.srLogger.error(
@@ -577,27 +562,22 @@ class QueueItemUpdate(ShowQueueItem):
             return
 
         try:
-            sickrage.srCore.srLogger.debug("Retrieving show info from TMDb")
-            self.show.loadTMDbInfo()
+            sickrage.srCore.srLogger.debug("Attempting to retrieve show info from IMDb")
+            self.show.loadIMDbInfo()
         except Exception as e:
-            sickrage.srCore.srLogger.error("Error loading TMDb info: {}".format(e.message))
+            sickrage.srCore.srLogger.error("Error loading IMDb info: {}".format(e.message))
             sickrage.srCore.srLogger.debug(traceback.format_exc())
-            try:
-                sickrage.srCore.srLogger.debug("Attempting to retrieve show info from IMDb")
-                self.show.loadIMDbInfo()
-            except Exception as e:
-                sickrage.srCore.srLogger.error("Error loading IMDb info: {}".format(e.message))
-                sickrage.srCore.srLogger.debug(traceback.format_exc())
 
         # have to save show before reading episodes from db
         try:
             self.show.saveToDB()
         except Exception as e:
             sickrage.srCore.srLogger.error("Error saving show info to the database: {}".format(e.message))
-            sickrage.srCore.srLogger.debug(traceback.format_exc())
+            return
 
         # get episode list from DB
-        DBEpList = self.show.loadEpisodesFromDB() if not self.force else {}
+        DBEpList = self.show.loadEpisodesFromDB()
+        IndexerEpList = None
 
         # get episode list from TVDB
         try:
@@ -605,32 +585,26 @@ class QueueItemUpdate(ShowQueueItem):
         except indexer_exception as e:
             sickrage.srCore.srLogger.error("Unable to get info from " + srIndexerApi(
                 self.show.indexer).name + ", the show info will not be refreshed: {}".format(e.message))
-            IndexerEpList = None
 
         if IndexerEpList is None:
             sickrage.srCore.srLogger.error("No data returned from " + srIndexerApi(
                 self.show.indexer).name + ", unable to update this show")
         else:
-            # for each ep we found on the Indexer not in the DB list add to DB
-            sql_l = []
+            # for each ep we found on indexer delete it from the DB list
             for curSeason in IndexerEpList:
-                for curEpisode in set(IndexerEpList[curSeason]).difference(DBEpList.get(curSeason, {})):
-                    sql_q = self.show.getEpisode(curSeason, curEpisode, forceIndexer=True).saveToDB(False)
-                    if sql_q:
-                        sql_l.append(sql_q)
-
-            if len(sql_l) > 0:
-                main_db.MainDB().mass_upsert(sql_l)
-                del sql_l  # cleanup
+                for curEpisode in IndexerEpList[curSeason]:
+                    if curSeason in DBEpList and curEpisode in DBEpList[curSeason]:
+                        del DBEpList[curSeason][curEpisode]
 
             # remaining episodes in the DB list are not on the indexer, just delete them from the DB
             for curSeason in DBEpList:
-                for curEpisode in set(DBEpList[curSeason]).difference(IndexerEpList.get(curSeason, {})):
-                    sickrage.srCore.srLogger.info("Permanently deleting episode " + str(curSeason) + "x" + str(
-                        curEpisode) + " from the database")
+                for curEpisode in DBEpList[curSeason]:
+                    sickrage.srCore.srLogger.info(
+                        "Permanently deleting episode " + str(curSeason) + "x" + str(curEpisode) + " from the database")
 
+                    curEp = self.show.getEpisode(curSeason, curEpisode)
                     try:
-                        self.show.getEpisode(curSeason, curEpisode).deleteEpisode()
+                        curEp.deleteEpisode()
                     except EpisodeDeletedException:
                         pass
 
@@ -646,21 +620,19 @@ class QueueItemUpdate(ShowQueueItem):
 
 class QueueItemForceUpdate(QueueItemUpdate):
     def __init__(self, show=None):
-        super(QueueItemForceUpdate, self).__init__(ShowQueueActions.FORCEUPDATE, show)
+        super(QueueItemForceUpdate, self).__init__(show, ShowQueueActions.FORCEUPDATE)
         self.force = True
 
 
 class QueueItemRemove(ShowQueueItem):
     def __init__(self, show=None, full=False):
-        super(QueueItemRemove, self).__init__(ShowQueueActions.REMOVE, show)
+        super(QueueItemRemove, self).__init__(show, ShowQueueActions.REMOVE)
 
         # lets make sure this happens before any other high priority actions
-        self.priority = QueuePriorities.HIGH + QueuePriorities.HIGH
+        self.priority = srQueuePriorities.HIGH + srQueuePriorities.HIGH
         self.full = full
 
     def run(self):
-        super(QueueItemRemove, self).run()
-
         sickrage.srCore.srLogger.info("Removing show: {}".format(self.show.name))
 
         self.show.deleteShow(full=self.full)
@@ -671,5 +643,7 @@ class QueueItemRemove(ShowQueueItem):
             except Exception as e:
                 sickrage.srCore.srLogger.warning(
                     "Unable to delete show from Trakt: %s. Error: %s" % (self.show.name, e))
+
+        self.finish()
 
         sickrage.srCore.srLogger.info("Finished removing show: {}".format(self.show.name))

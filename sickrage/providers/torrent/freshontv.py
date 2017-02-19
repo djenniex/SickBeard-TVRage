@@ -1,5 +1,5 @@
 # Author: Idan Gutman
-# URL: http://github.com/SiCKRAGETV/SickRage/
+# URL: https://sickrage.ca
 #
 # This file is part of SickRage.
 #
@@ -23,18 +23,17 @@ import time
 import traceback
 
 import requests
-
 import sickrage
-from sickrage.core.caches import tv_cache
+from sickrage.core.caches.tv_cache import TVCache
 from sickrage.core.helpers import tryInt, bs4_parser
 from sickrage.providers import TorrentProvider
 
 
 class FreshOnTVProvider(TorrentProvider):
     def __init__(self):
-        super(FreshOnTVProvider, self).__init__("FreshOnTV",'freshon.tv')
+        super(FreshOnTVProvider, self).__init__("FreshOnTV",'freshon.tv', True)
 
-        self.supportsBacklog = True
+        self.supports_backlog = True
 
         self._uid = None
         self._hash = None
@@ -45,7 +44,7 @@ class FreshOnTVProvider(TorrentProvider):
         self.minleech = None
         self.freeleech = False
 
-        self.cache = FreshOnTVCache(self)
+        self.cache = TVCache(self, min_time=20)
 
         self.urls.update({
             'login': '{base_url}/login.php?action=makelogin'.format(base_url=self.urls['base_url']),
@@ -56,14 +55,14 @@ class FreshOnTVProvider(TorrentProvider):
 
         self.cookies = None
 
-    def _checkAuth(self):
+    def _check_auth(self):
 
         if not self.username or not self.password:
             sickrage.srCore.srLogger.warning("[{}]: Invalid username or password. Check your settings".format(self.name))
 
         return True
 
-    def _doLogin(self):
+    def login(self):
         if any(requests.utils.dict_from_cookiejar(sickrage.srCore.srWebSession.cookies).values()):
             return True
 
@@ -111,7 +110,7 @@ class FreshOnTVProvider(TorrentProvider):
 
         freeleech = '3' if self.freeleech else '0'
 
-        if not self._doLogin():
+        if not self.login():
             return results
 
         for mode in search_params.keys():
@@ -240,17 +239,5 @@ class FreshOnTVProvider(TorrentProvider):
 
         return results
 
-    def seedRatio(self):
+    def seed_ratio(self):
         return self.ratio
-
-
-class FreshOnTVCache(tv_cache.TVCache):
-    def __init__(self, provider_obj):
-        tv_cache.TVCache.__init__(self, provider_obj)
-
-        # poll delay in minutes
-        self.minTime = 20
-
-    def _getRSSData(self):
-        search_params = {'RSS': ['']}
-        return {'entries': self.provider.search(search_params)}

@@ -1,8 +1,8 @@
-#!/usr/bin/env python2
+
 
 # Author: echel0n <echel0n@sickrage.ca>
-# URL: https://sickrage.tv/
-# Git: https://github.com/SiCKRAGETV/SickRage.git
+# URL: https://sickrage.ca/
+# Git: https://git.sickrage.ca/SiCKRAGE/sickrage.git
 #
 # This file is part of SickRage.
 #
@@ -28,15 +28,19 @@ import re
 import six
 
 if six.PY3:
-    # noinspection PyUnresolvedReferences
     from collections import UserDict
 else:
     from UserDict import UserDict
 
+video_exts = ['3g2', '3gp', '3gp2', 'asf', 'avi', 'divx', 'flv', 'm4v', 'mk2',
+              'mka', 'mkv', 'mov', 'mp4', 'mp4a', 'mpeg', 'mpg', 'ogg', 'ogm',
+              'ogv', 'qt', 'ra', 'ram', 'rm', 'ts', 'wav', 'webm', 'wma', 'wmv']
+
+### CPU Presets for sleep timers
 cpu_presets = {
-    'HIGH': 5,
-    'NORMAL': 2,
-    'LOW': 1
+    'HIGH': 0.05,
+    'NORMAL': 0.02,
+    'LOW': 0.01
 }
 
 ### Other constants
@@ -79,13 +83,9 @@ NAMING_LIMITED_EXTEND = 8
 NAMING_SEPARATED_REPEAT = 16
 NAMING_LIMITED_EXTEND_E_PREFIXED = 32
 
-multiEpStrings = {}
-multiEpStrings[NAMING_REPEAT] = "Repeat"
-multiEpStrings[NAMING_SEPARATED_REPEAT] = "Repeat (Separated)"
-multiEpStrings[NAMING_DUPLICATE] = "Duplicate"
-multiEpStrings[NAMING_EXTEND] = "Extend"
-multiEpStrings[NAMING_LIMITED_EXTEND] = "Extend (Limited)"
-multiEpStrings[NAMING_LIMITED_EXTEND_E_PREFIXED] = "Extend (Limited, E-prefixed)"
+multiEpStrings = {NAMING_REPEAT: "Repeat", NAMING_SEPARATED_REPEAT: "Repeat (Separated)", NAMING_DUPLICATE: "Duplicate",
+                  NAMING_EXTEND: "Extend", NAMING_LIMITED_EXTEND: "Extend (Limited)",
+                  NAMING_LIMITED_EXTEND_E_PREFIXED: "Extend (Limited, E-prefixed)"}
 
 
 # pylint: disable=W0232
@@ -106,6 +106,18 @@ class Quality(object):
 
     # put these bits at the other end of the spectrum, far enough out that they shouldn't interfere
     UNKNOWN = 1 << 15  # 32768
+
+    qualitySizes = {NONE: 0,
+                    UNKNOWN: 0,
+                    SDTV: 700,
+                    SDDVD: 700,
+                    HDTV: 1200,
+                    RAWHDTV: 1200,
+                    FULLHDTV: 1200,
+                    HDWEBDL: 1200,
+                    FULLHDWEBDL: 1400,
+                    HDBLURAY: 1200,
+                    FULLHDBLURAY: 1400}
 
     qualityStrings = {NONE: "N/A",
                       UNKNOWN: "Unknown",
@@ -546,6 +558,7 @@ countryList = {'Australia': 'AU',
                'Canada': 'CA',
                'USA': 'US'
                }
+
 dateFormat = '%Y-%m-%d'
 dateTimeFormat = '%Y-%m-%d %H:%M:%S'
 timeFormat = '%A %I:%M %p'

@@ -22,9 +22,8 @@ import re
 import traceback
 
 import sickrage
-from sickrage.core.caches import tv_cache
+from sickrage.core.caches.tv_cache import TVCache
 from sickrage.core.common import Quality
-from sickrage.core.databases import main_db
 from sickrage.core.exceptions import AuthException
 from sickrage.core.helpers import bs4_parser
 from sickrage.core.nameparser import InvalidNameException, InvalidShowException, \
@@ -60,9 +59,9 @@ category_excluded = {'Sport': 22,
 
 class TNTVillageProvider(TorrentProvider):
     def __init__(self):
-        super(TNTVillageProvider, self).__init__("TNTVillage", 'forum.tntvillage.scambioetico.org')
+        super(TNTVillageProvider, self).__init__("TNTVillage", 'forum.tntvillage.scambioetico.org', True)
 
-        self.supportsBacklog = True
+        self.supports_backlog = True
 
         self._uid = None
         self._hash = None
@@ -112,16 +111,16 @@ class TNTVillageProvider(TorrentProvider):
 
         self.categories = "cat=29"
 
-        self.cache = TNTVillageCache(self)
+        self.cache = TVCache(self, min_time=30)
 
-    def _checkAuth(self):
+    def _check_auth(self):
 
         if not self.username or not self.password:
             raise AuthException("Your authentication credentials for " + self.name + " are missing, check your config.")
 
         return True
 
-    def _doLogin(self):
+    def login(self):
 
         login_params = {'UserName': self.username,
                         'PassWord': self.password,
@@ -136,7 +135,8 @@ class TNTVillageProvider(TorrentProvider):
 
         if re.search('Sono stati riscontrati i seguenti errori', response) or re.search('<title>Connettiti</title>',
                                                                                         response):
-            sickrage.srCore.srLogger.warning("[{}]: Invalid username or password. Check your settings".format(self.name))
+            sickrage.srCore.srLogger.warning(
+                "[{}]: Invalid username or password. Check your settings".format(self.name))
             return False
 
         return True
@@ -183,7 +183,8 @@ class TNTVillageProvider(TorrentProvider):
                                                                                 "").replace(".gif", "").replace(".png",
                                                                                                                 "")
                 except Exception:
-                    sickrage.srCore.srLogger.error("Failed parsing quality. Traceback: {}".format(traceback.format_exc()))
+                    sickrage.srCore.srLogger.error(
+                        "Failed parsing quality. Traceback: {}".format(traceback.format_exc()))
 
         else:
             file_quality = (torrent_rows.find_all('td'))[1].get_text()
@@ -275,10 +276,8 @@ class TNTVillageProvider(TorrentProvider):
             sickrage.srCore.srLogger.debug("Unable to parse the filename %s into a valid show" % name)
             return False
 
-        sql_selection = "SELECT count(*) AS count FROM tv_episodes WHERE showid = ? AND season = ?"
-        episodes = main_db.MainDB().select(sql_selection, [parse_result.show.indexerid, parse_result.season_number])
-        if int(episodes[0]['count']) == len(parse_result.episode_numbers):
-            return True
+        if len([x for x in sickrage.srCore.mainDB.db.get_many('tv_episodes', parse_result.show.indexerid, with_doc=True)
+                if x['doc']['season'] == parse_result.season_number]) == len(parse_result.episode_numbers): return True
 
     def search(self, search_params, search_mode='eponly', epcount=0, age=0, epObj=None):
 
@@ -287,7 +286,7 @@ class TNTVillageProvider(TorrentProvider):
 
         self.categories = "cat=" + str(self.cat)
 
-        if not self._doLogin():
+        if not self.login():
             return results
 
         for mode in search_params.keys():
@@ -333,7 +332,8 @@ class TNTVillageProvider(TorrentProvider):
 
                             # Continue only if one Release is found
                             if len(torrent_rows) < 3:
-                                sickrage.srCore.srLogger.debug("Data returned from provider does not contain any torrents")
+                                sickrage.srCore.srLogger.debug(
+                                    "Data returned from provider does not contain any torrents")
                                 last_page = 1
                                 continue
 
@@ -407,7 +407,8 @@ class TNTVillageProvider(TorrentProvider):
                                 items[mode].append(item)
 
                     except Exception:
-                        sickrage.srCore.srLogger.error("Failed parsing provider. Traceback: %s" % traceback.format_exc())
+                        sickrage.srCore.srLogger.error(
+                            "Failed parsing provider. Traceback: %s" % traceback.format_exc())
 
                 # For each search mode sort all the items by seeders if available if available
                 items[mode].sort(key=lambda tup: tup[3], reverse=True)
@@ -416,17 +417,5 @@ class TNTVillageProvider(TorrentProvider):
 
         return results
 
-    def seedRatio(self):
+    def seed_ratio(self):
         return self.ratio
-
-
-class TNTVillageCache(tv_cache.TVCache):
-    def __init__(self, provider_obj):
-        tv_cache.TVCache.__init__(self, provider_obj)
-
-        # only poll TNTVillage every 30 minutes max
-        self.minTime = 30
-
-    def _getRSSData(self):
-        search_params = {'RSS': []}
-        return {'entries': self.provider.search(search_params)}

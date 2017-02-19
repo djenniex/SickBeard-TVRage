@@ -1,6 +1,6 @@
 # -*- coding: latin-1 -*-
 # Author: adaur <adaur.underground@gmail.com>
-# URL: http://github.com/SiCKRAGETV/SickRage/
+# URL: https://sickrage.ca
 #
 # This file is part of SickRage.
 #
@@ -24,8 +24,8 @@ import re
 import urllib
 
 import requests
-
 import sickrage
+from sickrage.core.caches.tv_cache import TVCache
 from sickrage.core.helpers import bs4_parser
 from sickrage.providers import TorrentProvider
 
@@ -33,9 +33,9 @@ from sickrage.providers import TorrentProvider
 class XthorProvider(TorrentProvider):
     def __init__(self):
 
-        super(XthorProvider, self).__init__("Xthor","xthor.bz")
+        super(XthorProvider, self).__init__("Xthor","xthor.bz", True)
 
-        self.supportsBacklog = True
+        self.supports_backlog = True
 
         self.cj = cookielib.CookieJar()
 
@@ -49,7 +49,9 @@ class XthorProvider(TorrentProvider):
         self.password = None
         self.ratio = None
 
-    def _doLogin(self):
+        self.cache = TVCache(self, min_time=10)
+
+    def login(self):
         if any(requests.utils.dict_from_cookiejar(sickrage.srCore.srWebSession.cookies).values()):
             return True
 
@@ -75,7 +77,7 @@ class XthorProvider(TorrentProvider):
         items = {'Season': [], 'Episode': [], 'RSS': []}
 
         # check for auth
-        if not self._doLogin():
+        if not self.login():
             return results
 
         for mode in search_params.keys():
@@ -131,5 +133,5 @@ class XthorProvider(TorrentProvider):
 
         return results
 
-    def seedRatio(self):
+    def seed_ratio(self):
         return self.ratio

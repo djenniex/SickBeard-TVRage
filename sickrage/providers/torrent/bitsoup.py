@@ -1,5 +1,5 @@
 # Author: Idan Gutman
-# URL: http://github.com/SiCKRAGETV/SickRage/
+# URL: https://sickrage.ca
 #
 # This file is part of SickRage.
 #
@@ -22,14 +22,14 @@ import re
 import traceback
 
 import sickrage
-from sickrage.core.caches import tv_cache
+from sickrage.core.caches.tv_cache import TVCache
 from sickrage.core.helpers import bs4_parser
 from sickrage.providers import TorrentProvider
 
 
 class BitSoupProvider(TorrentProvider):
     def __init__(self):
-        super(BitSoupProvider, self).__init__("BitSoup",'www.bitsoup.me')
+        super(BitSoupProvider, self).__init__("BitSoup",'www.bitsoup.me', True)
 
         self.urls.update({
             'login': '{base_url}/takelogin.php'.format(base_url=self.urls['base_url']),
@@ -38,7 +38,7 @@ class BitSoupProvider(TorrentProvider):
             'download': '{base_url}/%s'.format(base_url=self.urls['base_url'])
         })
 
-        self.supportsBacklog = True
+        self.supports_backlog = True
 
         self.username = None
         self.password = None
@@ -46,19 +46,15 @@ class BitSoupProvider(TorrentProvider):
         self.minseed = None
         self.minleech = None
 
-        self.cache = BitSoupCache(self)
+        self.cache = TVCache(self, min_time=20)
 
-        self.search_params = {
-            "c42": 1, "c45": 1, "c49": 1, "c7": 1
-        }
-
-    def _checkAuth(self):
+    def _check_auth(self):
         if not self.username or not self.password:
             sickrage.srCore.srLogger.warning("[{}]: Invalid username or password. Check your settings".format(self.name))
 
         return True
 
-    def _doLogin(self):
+    def login(self):
 
         login_params = {
             'username': self.username,
@@ -79,11 +75,15 @@ class BitSoupProvider(TorrentProvider):
         return True
 
     def search(self, search_strings, search_mode='eponly', epcount=0, age=0, epObj=None):
-
         results = []
+
+        search_params = {
+            "c42": 1, "c45": 1, "c49": 1, "c7": 1
+        }
+
         items = {'Season': [], 'Episode': [], 'RSS': []}
 
-        if not self._doLogin():
+        if not self.login():
             return results
 
         for mode in search_strings.keys():
@@ -93,10 +93,10 @@ class BitSoupProvider(TorrentProvider):
                 if mode != 'RSS':
                     sickrage.srCore.srLogger.debug("Search string: %s " % search_string)
 
-                self.search_params['search'] = search_string
+                search_params['search'] = search_string
 
                 try:
-                    data = sickrage.srCore.srWebSession.get(self.urls['search'], self.search_params).text
+                    data = sickrage.srCore.srWebSession.get(self.urls['search'], search_params).text
                 except Exception:
                     sickrage.srCore.srLogger.debug("No data returned from provider")
                     continue
@@ -152,17 +152,5 @@ class BitSoupProvider(TorrentProvider):
 
         return results
 
-    def seedRatio(self):
+    def seed_ratio(self):
         return self.ratio
-
-
-class BitSoupCache(tv_cache.TVCache):
-    def __init__(self, provider_obj):
-        tv_cache.TVCache.__init__(self, provider_obj)
-
-        # only poll TorrentBytes every 20 minutes max
-        self.minTime = 20
-
-    def _getRSSData(self):
-        search_strings = {'RSS': ['']}
-        return {'entries': self.provider.search(search_strings)}

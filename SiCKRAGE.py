@@ -1,7 +1,6 @@
-#!/usr/bin/env python2
-
+#!/usr/bin/env python2.7
 # Author: echel0n <echel0n@sickrage.ca>
-# URL: https://git.sickrage.ca
+# URL: https://sickrage.ca
 #
 # This file is part of SickRage.
 #
@@ -21,8 +20,8 @@
 from __future__ import unicode_literals
 
 import os
-import sys
 import site
+import sys
 
 if __name__ == '__main__':
     # add sickrage libs path to python system path

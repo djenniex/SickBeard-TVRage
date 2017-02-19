@@ -1,5 +1,5 @@
 # Author: echel0n <echel0n@sickrage.ca>
-# URL: http://github.com/SiCKRAGETV/SickRage/
+# URL: https://sickrage.ca
 #
 # This file is part of SickRage.
 #
@@ -38,8 +38,8 @@ class Route(object):
 
     @staticmethod
     def get_routes(webroot=''):
-        Route._routes.reverse()
         routes = [tornado.web.url(webroot + _uri, _handler, name=name) for _uri, _handler, name, in Route._routes]
+        routes.reverse()
         return routes
 
 

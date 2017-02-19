@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+
 #
 # This file is part of aDBa.
 #
@@ -198,7 +198,7 @@ class Connection(threading.Thread):
         """
 
         if not all([username, password]):
-            sickrage.srCore.srLogger.debug("anidb username and/or password are not set. Aborting anidb lookup.")
+            sickrage.srCore.srLogger.debug("AniDB username and/or password are not set. Aborting AniDB lookup.")
             return False
 
         authed = self.authed()
@@ -208,9 +208,9 @@ class Connection(threading.Thread):
                 self.log("ok2")
                 self._username = username
                 self._password = password
-                if self.is_alive() == False:
+                if not self.is_alive():
                     self.log("You wanted to keep this thing alive!")
-                    if self._iamALIVE == False:
+                    if not self._iamALIVE:
                         self.log("Starting thread now...")
                         self.start()
                         self._iamALIVE = True
